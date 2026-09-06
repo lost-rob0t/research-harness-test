@@ -1,0 +1,32 @@
+{
+  "schema": "research-harness-test.mcp.v1",
+  "servers": {
+    "brave": {
+      "name": "Brave Search MCP",
+      "package": "@brave/brave-search-mcp-server",
+      "version": "2.1.3",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "--yes",
+        "@brave/brave-search-mcp-server@2.1.3"
+      ],
+      "env": {
+        "BRAVE_API_KEY": "${BRAVE_API_KEY}"
+      }
+    },
+    "fetch": {
+      "name": "Fetch MCP",
+      "package": "mcp-server-fetch",
+      "version": "2026.8.18",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "mcp-server-fetch==2026.8.18",
+        "mcp-server-fetch"
+      ],
+      "env": {}
+    }
+  }
+}
