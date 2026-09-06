@@ -13,7 +13,14 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from mcp_client import LabRetrieval, MCPError, MCPStdioClient, load_mcp_config, public_server_metadata
+from mcp_client import (
+    LabRetrieval,
+    MCPError,
+    MCPStdioClient,
+    bound_brave_query,
+    load_mcp_config,
+    public_server_metadata,
+)
 
 FAKE_CONFIG = ROOT / "tests" / "fixtures" / "mcp-servers.fake.json"
 
@@ -45,6 +52,52 @@ class MCPTests(unittest.TestCase):
             events = (output / "mcp-events.jsonl").read_text()
             self.assertIn('"kind": "search"', events)
             self.assertIn('"kind": "fetch"', events)
+
+    def test_brave_query_is_bounded_to_server_contract(self) -> None:
+        query = " ".join(f"word{i}" for i in range(100))
+        bounded = bound_brave_query(query)
+        self.assertLessEqual(len(bounded), 400)
+        self.assertLessEqual(len(bounded.split()), 50)
+        self.assertTrue(bounded)
+
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            os.environ, {"RESEARCH_MCP_CONFIG": str(FAKE_CONFIG)}, clear=False
+        ):
+            output = Path(td)
+            with LabRetrieval(output) as retrieval:
+                self.assertEqual(len(retrieval.search(query, count=2)), 2)
+            events = [json.loads(line) for line in (output / "mcp-events.jsonl").read_text().splitlines()]
+            search = next(event for event in events if event["kind"] == "search")
+            self.assertEqual(search["query"], query)
+            self.assertEqual(search["sent_query"], bounded)
+
+    def test_official_brave_json_line_shape_preserves_metadata(self) -> None:
+        payload = json.loads(FAKE_CONFIG.read_text())
+        payload["servers"]["brave"]["env"]["FAKE_MCP_MODE"] = "json-lines"
+        with tempfile.TemporaryDirectory() as td:
+            config_path = Path(td) / "mcp.json"
+            config_path.write_text(json.dumps(payload))
+            with patch.dict(os.environ, {"RESEARCH_MCP_CONFIG": str(config_path)}, clear=False):
+                with LabRetrieval(Path(td) / "out") as retrieval:
+                    results = retrieval.search("shape test", count=2)
+        self.assertEqual(results[0]["title"], "Primary source for shape test")
+        self.assertEqual(results[0]["snippet"], "primary")
+        self.assertEqual(results[1]["url"], "https://example.test/secondary")
+
+    def test_mcp_tool_is_error_is_failure_not_empty_success(self) -> None:
+        payload = json.loads(FAKE_CONFIG.read_text())
+        payload["servers"]["brave"]["env"]["FAKE_MCP_MODE"] = "tool-error"
+        with tempfile.TemporaryDirectory() as td:
+            config_path = Path(td) / "mcp.json"
+            config_path.write_text(json.dumps(payload))
+            output = Path(td) / "out"
+            with patch.dict(os.environ, {"RESEARCH_MCP_CONFIG": str(config_path)}, clear=False):
+                with LabRetrieval(output) as retrieval:
+                    with self.assertRaisesRegex(MCPError, "No web results found"):
+                        retrieval.search("anything")
+            events = [json.loads(line) for line in (output / "mcp-events.jsonl").read_text().splitlines()]
+            failed = next(event for event in events if event["kind"] == "search")
+            self.assertFalse(failed["success"])
 
     def test_concurrent_isolated_clients(self) -> None:
         def one(index: int) -> int:
