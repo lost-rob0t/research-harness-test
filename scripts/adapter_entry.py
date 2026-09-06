@@ -151,7 +151,7 @@ async def run_gpt_researcher_async(upstream: Path, request: dict[str, Any], outp
             "guidelines_surface": "query-prefix",
             "retriever": "custom",
             "retrieval_mode": "custom-retriever-bridge",
-            "note": "GPT Researcher's custom retriever receives Brave Search MCP results whose URLs are hydrated by Fetch MCP. No Tavily/Serper/Jina path is enabled.",
+            "note": "GPT Researcher's custom retriever receives Brave Search MCP results whose URLs are hydrated by Fetch MCP.",
         },
     )
 
@@ -207,7 +207,6 @@ def run_smolagents_odr(upstream: Path, request: dict[str, Any], output: Path) ->
             tools=[],
             max_steps=12,
             verbosity_level=2,
-            additional_authorized_imports=["*"],
             planning_interval=4,
             managed_agents=[search_agent],
         )
