@@ -34,12 +34,16 @@ def call_tool(name, arguments):
         time.sleep(1.0)
     if MODE == "malformed":
         return {"content": [{"type": "text", "text": "not json and no url"}]}
+    if MODE == "tool-error":
+        return {"content": [{"type": "text", "text": "No web results found"}], "isError": True}
     if KIND == "brave" and name in {"brave_web_search", "brave_news_search"}:
         query = arguments.get("query", "")
         body = [
             {"title": f"Primary source for {query}", "url": "https://example.test/primary", "description": "primary"},
             {"title": f"Secondary source for {query}", "url": "https://example.test/secondary", "description": "secondary"},
         ]
+        if MODE == "json-lines":
+            return {"content": [{"type": "text", "text": json.dumps(item)} for item in body]}
         return {"content": [{"type": "text", "text": json.dumps(body)}]}
     if KIND == "fetch" and name == "fetch":
         url = arguments.get("url", "")
