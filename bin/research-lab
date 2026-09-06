@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LAB_ROOT="${RESEARCH_LAB_ROOT:-$ROOT/.lab}"
 PY=(python3 "$ROOT/scripts/research_lab.py")
+SETUP=(python3 "$ROOT/scripts/setup_harnesses.py")
 
 command="${1:-}"
 dry_run=0
@@ -15,9 +16,15 @@ for arg in "$@"; do
   fi
 done
 
-# A real benchmark should be runnable from a fresh checkout.  Prepare only the
-# selected harnesses that are actually missing; do not reinstall healthy lanes
-# on every invocation.  Set RESEARCH_LAB_AUTO_SETUP=0 to opt out.
+if [[ "$command" == "setup" ]]; then
+  shift
+  exec "${SETUP[@]}" "$@"
+fi
+
+# A real benchmark should be runnable from a fresh checkout. Prepare only the
+# selected harnesses that are actually missing; the idempotent setup helper
+# verifies pinned revisions and dependency recipe markers before doing work.
+# Set RESEARCH_LAB_AUTO_SETUP=0 to opt out.
 if [[ "$dry_run" -eq 0 && "${RESEARCH_LAB_AUTO_SETUP:-1}" != "0" ]]; then
   case "$command" in
     matrix)
@@ -44,28 +51,8 @@ if [[ "$dry_run" -eq 0 && "${RESEARCH_LAB_AUTO_SETUP:-1}" != "0" ]]; then
   esac
 
   if [[ -n "$selected" ]]; then
-    missing=()
-    IFS=',' read -r -a harnesses <<< "$selected"
-    for harness in "${harnesses[@]}"; do
-      harness="${harness//[[:space:]]/}"
-      [[ -z "$harness" ]] && continue
-      case "$harness" in
-        starintel)
-          [[ -x "$LAB_ROOT/upstreams/starintel/bin/research" ]] || missing+=("$harness")
-          ;;
-        *)
-          if [[ ! -d "$LAB_ROOT/upstreams/$harness/.git" || ! -x "$LAB_ROOT/venvs/$harness/bin/python" ]]; then
-            missing+=("$harness")
-          fi
-          ;;
-      esac
-    done
-
-    if (( ${#missing[@]} > 0 )); then
-      csv="$(IFS=,; echo "${missing[*]}")"
-      echo "[lab] preparing missing harnesses: $csv"
-      "${PY[@]}" setup --harnesses "$csv"
-    fi
+    echo "[lab] verifying harness environments: $selected"
+    "${SETUP[@]}" --harnesses "$selected"
   fi
 fi
 
@@ -76,8 +63,8 @@ set -e
 
 if (( rc != 0 )) && [[ "$command" == "matrix" || "$command" == "run" ]]; then
   echo >&2
-  echo "[lab] run failed. Result directories contain stderr.log, stdout.log, result.json, and MCP diagnostics." >&2
-  echo "[lab] inspect the newest failures with:" >&2
+  echo "[lab] run failed. Each lane keeps stderr.log, stdout.log, result.json, and MCP diagnostics." >&2
+  echo "[lab] newest result files:" >&2
   echo "  find runs -name result.json -printf '%T@ %p\n' | sort -nr | head -n 8" >&2
 fi
 
