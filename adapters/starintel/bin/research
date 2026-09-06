@@ -51,6 +51,8 @@ export AR_CORPUS_ROOT="$CORPUS"
 export AR_WEB_PORT="$((18080 + slot))"
 export AR_PIDFILE="$OUTPUT/starintel-daemon.pid"
 export AR_LOGFILE="$OUTPUT/starintel-daemon.log"
+API="http://127.0.0.1:$AR_WEB_PORT/api/v1"
+TOKEN="${AR_OPERATOR_TOKEN:-dev-operator-token}"
 
 cleanup() {
   set +e
@@ -70,15 +72,52 @@ set +e
 rc=$?
 set -e
 
-# Preserve and surface the full daemon failure, not only upstream's final
-# 15 stack frames. This turns future startup failures into actionable output.
+run_id="$(sed -n 's/^run \([^ ]*\) queued.*/\1/p' "$NATIVE_STDOUT" | tail -n1)"
+native_status="$(sed -n 's/^== run [^:]*: \([^ ]*\) ==$/\1/p' "$NATIVE_STDOUT" | tail -n1)"
+
+# Capture the authoritative API payloads while the isolated daemon is still
+# alive. The pinned upstream CLI currently prints only event names and can
+# itself fail while formatting candidates, which used to hide the real RLM
+# error. These files make provider/bridge failures directly inspectable.
+if [ -n "$run_id" ]; then
+  curl -sS -m 10 -H "Authorization: Bearer $TOKEN" \
+    "$API/runs/$run_id" > "$OUTPUT/starintel-run.json" || true
+  curl -sS -m 10 -H "Authorization: Bearer $TOKEN" \
+    "$API/runs/$run_id/events" > "$OUTPUT/starintel-events.json" || true
+  curl -sS -m 10 -H "Authorization: Bearer $TOKEN" \
+    "$API/runs/$run_id/candidates" > "$OUTPUT/starintel-candidates.json" || true
+
+  if [ -s "$OUTPUT/starintel-run.json" ]; then
+    python3 - "$OUTPUT/starintel-run.json" <<'PY' >&2 || true
+import json
+import sys
+from pathlib import Path
+
+try:
+    data = json.loads(Path(sys.argv[1]).read_text())
+except Exception:
+    raise SystemExit(0)
+
+print("=== starintel native run ===")
+print(json.dumps(data, indent=2, ensure_ascii=False))
+error = data.get("error") if isinstance(data, dict) else None
+if error:
+    print("=== starintel native error ===")
+    print(json.dumps(error, indent=2, ensure_ascii=False))
+PY
+  fi
+fi
+
+# Preserve and surface the full daemon log on native failure, not only
+# upstream's final stack frames. Startup failures and runtime failures are
+# both retained, while the API snapshots above carry structured run errors.
 if (( rc != 0 )) && [ -s "$AR_LOGFILE" ]; then
-  echo "=== starintel daemon failure ===" >&2
-  sed -n '1,120p' "$AR_LOGFILE" >&2
+  echo "=== starintel daemon log ===" >&2
+  sed -n '1,160p' "$AR_LOGFILE" >&2
   lines="$(wc -l < "$AR_LOGFILE")"
-  if (( lines > 120 )); then
+  if (( lines > 160 )); then
     echo "=== starintel daemon tail ===" >&2
-    tail -80 "$AR_LOGFILE" >&2
+    tail -100 "$AR_LOGFILE" >&2
   fi
 fi
 
@@ -109,8 +148,14 @@ elif [ -s "$NATIVE_STDOUT" ]; then
   cp "$NATIVE_STDOUT" "$OUTPUT/report.md"
 fi
 
-run_id="$(sed -n 's/^run \([^ ]*\) queued.*/\1/p' "$NATIVE_STDOUT" | tail -n1)"
-native_status="$(sed -n 's/^== run [^:]*: \([^ ]*\) ==$/\1/p' "$NATIVE_STDOUT" | tail -n1)"
+# The pinned corpus CLI has a presentation-layer candidates parser bug that
+# can return rc=1 after a genuinely completed native run. Do not let that
+# reporting defect turn a completed benchmark lane into a false failure.
+if [ "$native_status" = "completed" ] && (( rc != 0 )); then
+  echo "starintel adapter: upstream CLI failed after native completion; preserving completed status" >&2
+  rc=0
+fi
+
 python3 - "$OUTPUT/adapter-result.json" "$run_id" "$native_status" "$artifact_rel" "$AR_WEB_PORT" <<'PY'
 import json
 import sys
@@ -126,6 +171,9 @@ Path(path).write_text(json.dumps({
     "isolated_corpus": True,
     "isolated_port": int(port),
     "benchmark_source_isolation": True,
+    "native_run_snapshot": "starintel-run.json" if run_id else None,
+    "native_events_snapshot": "starintel-events.json" if run_id else None,
+    "native_candidates_snapshot": "starintel-candidates.json" if run_id else None,
 }, indent=2) + "\n")
 PY
 
