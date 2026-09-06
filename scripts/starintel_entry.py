@@ -7,9 +7,11 @@ import os
 import subprocess
 from pathlib import Path
 
-from mcp_client import LabRetrieval
+from mcp_client import LabRetrieval, MCPError
 
 ROOT = Path(__file__).resolve().parents[1]
+BRAVE_MAX_QUERY_CHARS = 400
+BRAVE_MAX_QUERY_WORDS = 50
 
 
 def parser() -> argparse.ArgumentParser:
@@ -20,13 +22,40 @@ def parser() -> argparse.ArgumentParser:
     return p
 
 
+def bounded_brave_query(query: str) -> str:
+    """Deterministically fit a benchmark question inside Brave's tool limits."""
+    words = query.strip().split()
+    bounded = " ".join(words[:BRAVE_MAX_QUERY_WORDS])
+    if len(bounded) > BRAVE_MAX_QUERY_CHARS:
+        bounded = bounded[:BRAVE_MAX_QUERY_CHARS]
+        if " " in bounded:
+            bounded = bounded.rsplit(" ", 1)[0]
+    return bounded.strip()
+
+
 def build_evidence_pack(retrieval: LabRetrieval, question: str, output: Path) -> str:
-    rows = retrieval.search(question, count=6)
-    chunks = ["# MCP evidence pack", "", f"Question: {question}", ""]
+    search_query = bounded_brave_query(question)
+    if search_query != question.strip():
+        (output / "mcp-query.txt").write_text(search_query + "\n")
+    rows = retrieval.search(search_query, count=6)
+    if not rows:
+        raise MCPError(
+            "Brave Search MCP returned no parseable results for the bounded benchmark query; "
+            "refusing to run StarIntel with an empty controlled evidence pack"
+        )
+    chunks = [
+        "# MCP evidence pack",
+        "",
+        f"Question: {question}",
+        f"Brave query: {search_query}",
+        "",
+    ]
+    fetched = 0
     for index, row in enumerate(rows, 1):
         url = row["url"]
         try:
             body = retrieval.fetch(url, max_length=14000)
+            fetched += 1
         except Exception as exc:
             body = f"[fetch failed: {exc}]"
         chunks.extend(
@@ -38,6 +67,8 @@ def build_evidence_pack(retrieval: LabRetrieval, question: str, output: Path) ->
                 "",
             ]
         )
+    if fetched == 0:
+        raise MCPError("Fetch MCP failed for every Brave result; refusing to run StarIntel without fetched evidence")
     text = "\n".join(chunks).rstrip() + "\n"
     (output / "mcp-context.md").write_text(text)
     return text
