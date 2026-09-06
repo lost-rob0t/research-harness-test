@@ -82,11 +82,15 @@ class ResearchLabTests(unittest.TestCase):
             self.assertRegex(ref, r"^[0-9a-f]{40}$")
             self.assertIn("BRAVE_API_KEY", config["harnesses"][harness_id]["required_env"])
 
-    def test_nix_shell_exposes_openssl_to_cl_ssl(self) -> None:
+    def test_nix_shell_exposes_openssl_and_prolog_rlm_runtime(self) -> None:
         flake = (ROOT / "flake.nix").read_text()
         self.assertIn("openssl", flake)
         self.assertIn("LD_LIBRARY_PATH", flake)
         self.assertIn("makeLibraryPath [ pkgs.openssl ]", flake)
+        self.assertIn("swi-prolog", flake)
+        self.assertIn("PROLOG_RLM_SWIPL", flake)
+        self.assertIn("git+ssh://git@git.starintel.actor/nsaspy/prolog-rlm.git", flake)
+        self.assertIn("e1ed6c2b5f717d9bb380fcf22d144737299197f8", flake)
 
     def test_python_entrypoints_compile(self) -> None:
         for path in (
