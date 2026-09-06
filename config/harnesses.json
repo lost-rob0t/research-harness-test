@@ -13,10 +13,10 @@
     "starintel": {
       "name": "StarIntel Auto Research CL",
       "repo": "https://github.com/starintel-labs/auto-research-llm-cl.git",
-      "ref": "0ddee8d1bcf0120f083241c3cb69eaecbe69f623",
+      "ref": "159441f478259996bbfe4290800dbc280c43ad6a",
       "adapter": "starintel",
       "enabled": true,
-      "required_env": ["OPENROUTER_API_KEY"]
+      "required_env": ["OPENROUTER_API_KEY", "AR_RUNTIME_SOURCE"]
     },
     "researchharness": {
       "name": "InternScience ResearchHarness",
