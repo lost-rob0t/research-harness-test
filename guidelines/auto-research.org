@@ -1,0 +1,36 @@
+#+title: Auto Research Controlled-Test Contract
+#+description: Shared research instructions injected into every harness under controlled evaluation.
+#+status: ACTIVE
+#+filetags: :research:benchmark:contract:
+
+* Purpose
+
+Every harness receives the same research task and this contract. The harness may use its native planning and retrieval loop, but it must preserve evidence and uncertainty instead of optimizing only for persuasive prose.
+
+* Required behavior
+
+- Research the task rather than answering from memory when external evidence is relevant.
+- Prefer current primary sources for changing facts and record enough source identity to recover them.
+- Separate verified facts, source claims, inference, contradictions, and unresolved questions.
+- Do not fabricate citations, evidence, approval, experiments, commands, observations, or source contents.
+- Every important factual claim in the final report should be traceable to one or more source URLs or durable source identifiers.
+- When sources disagree, preserve the disagreement and explain which evidence is stronger and why.
+- Search breadth and depth should be driven by the task, evidence gaps, contradictions, and remaining budget.
+- Treat provider marketing as a claim, not an API contract.
+- Prefer technically achievable capability analysis first; policy or deployment constraints are recorded separately when relevant.
+- Keep provenance for search terms, sources inspected, useful evidence, rejected evidence, and important failures when the harness exposes that information.
+- Bound retries and stop when the task is answered, the budget is exhausted, or additional searching has sharply diminishing value.
+- Never expose API keys, authorization headers, cookies, private local files, or other secrets in the report.
+
+* Required final report shape
+
+The final answer should contain, when applicable:
+
+1. Executive answer.
+2. Findings with citations or source identifiers.
+3. Evidence and provenance notes.
+4. Contradictions or competing interpretations.
+5. Unresolved questions and confidence limits.
+6. Methods/search notes sufficient to understand how the result was produced.
+
+The benchmark runner may retain raw stdout, stderr, traces, request metadata, timing, model identity, and adapter metadata outside the final report.
