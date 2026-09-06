@@ -1,4 +1,84 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-exec python3 "$ROOT/scripts/research_lab.py" "$@"
+LAB_ROOT="${RESEARCH_LAB_ROOT:-$ROOT/.lab}"
+PY=(python3 "$ROOT/scripts/research_lab.py")
+
+command="${1:-}"
+dry_run=0
+selected=""
+
+for arg in "$@"; do
+  if [[ "$arg" == "--dry-run" ]]; then
+    dry_run=1
+  fi
+done
+
+# A real benchmark should be runnable from a fresh checkout.  Prepare only the
+# selected harnesses that are actually missing; do not reinstall healthy lanes
+# on every invocation.  Set RESEARCH_LAB_AUTO_SETUP=0 to opt out.
+if [[ "$dry_run" -eq 0 && "${RESEARCH_LAB_AUTO_SETUP:-1}" != "0" ]]; then
+  case "$command" in
+    matrix)
+      selected="starintel,researchharness,gpt-researcher,smolagents-odr"
+      args=("$@")
+      for ((i=0; i<${#args[@]}; i++)); do
+        if [[ "${args[$i]}" == "--harnesses" && $((i + 1)) -lt ${#args[@]} ]]; then
+          selected="${args[$((i + 1))]}"
+        elif [[ "${args[$i]}" == --harnesses=* ]]; then
+          selected="${args[$i]#--harnesses=}"
+        fi
+      done
+      ;;
+    run)
+      args=("$@")
+      for ((i=0; i<${#args[@]}; i++)); do
+        if [[ "${args[$i]}" == "--harness" && $((i + 1)) -lt ${#args[@]} ]]; then
+          selected="${args[$((i + 1))]}"
+        elif [[ "${args[$i]}" == --harness=* ]]; then
+          selected="${args[$i]#--harness=}"
+        fi
+      done
+      ;;
+  esac
+
+  if [[ -n "$selected" ]]; then
+    missing=()
+    IFS=',' read -r -a harnesses <<< "$selected"
+    for harness in "${harnesses[@]}"; do
+      harness="${harness//[[:space:]]/}"
+      [[ -z "$harness" ]] && continue
+      case "$harness" in
+        starintel)
+          [[ -x "$LAB_ROOT/upstreams/starintel/bin/research" ]] || missing+=("$harness")
+          ;;
+        *)
+          if [[ ! -d "$LAB_ROOT/upstreams/$harness/.git" || ! -x "$LAB_ROOT/venvs/$harness/bin/python" ]]; then
+            missing+=("$harness")
+          fi
+          ;;
+      esac
+    done
+
+    if (( ${#missing[@]} > 0 )); then
+      csv="$(IFS=,; echo "${missing[*]}")"
+      echo "[lab] preparing missing harnesses: $csv"
+      "${PY[@]}" setup --harnesses "$csv"
+    fi
+  fi
+fi
+
+set +e
+"${PY[@]}" "$@"
+rc=$?
+set -e
+
+if (( rc != 0 )) && [[ "$command" == "matrix" || "$command" == "run" ]]; then
+  echo >&2
+  echo "[lab] run failed. Result directories contain stderr.log, stdout.log, result.json, and MCP diagnostics." >&2
+  echo "[lab] inspect the newest failures with:" >&2
+  echo "  find runs -name result.json -printf '%T@ %p\n' | sort -nr | head -n 8" >&2
+fi
+
+exit "$rc"
