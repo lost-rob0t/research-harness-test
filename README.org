@@ -1,16 +1,25 @@
 #+title: Research Harness Test Lab
 
-Concurrent deep-research harness comparison lab. See =lab.org=.
+Concurrent deep-research harness comparison lab using one controlled network stack:
+
+- OpenRouter for model inference
+- =z-ai/glm-5.3-flash= by default
+- Brave Search MCP =2.1.3= for discovery
+- Fetch MCP =2026.8.18= for page retrieval
+
+Everything is operated from [[file:lab.org][lab.org]].
 
 * Fast path
 
 #+begin_src sh
-cp env.example .env
-$EDITOR .env
+nix develop
+cp -n env.example .env
+${EDITOR:-emacs} .env
 ./bin/research-lab setup
-./bin/research-lab doctor
-./bin/research-lab matrix --case DR-001 --parallel 4 --model z-ai/glm-5.3-flash --dry-run
+./bin/research-mcp doctor
 ./bin/research-lab matrix --case DR-001 --parallel 4 --model z-ai/glm-5.3-flash --strict
 #+end_src
 
-The default matrix runs StarIntel Auto Research CL, InternScience ResearchHarness, GPT Researcher, and Hugging Face Open Deep Research concurrently through OpenRouter. Upstreams are pinned in =config/harnesses.json=; benchmark instructions live in =guidelines/auto-research.org=; experiment cases live in =cases/=; isolated results land under =runs/=.
+The controlled matrix runs StarIntel Auto Research CL, InternScience ResearchHarness, GPT Researcher, and Hugging Face smolagents Open Deep Research concurrently.
+
+Each run records =mcp.json= and =mcp-events.jsonl= so the result proves which pinned MCP servers and tools were actually used. StarIntel is explicitly marked as a bounded MCP-prefetch lane until its CL runtime exposes native benchmark-time MCP tool injection.
