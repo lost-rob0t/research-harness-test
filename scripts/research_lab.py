@@ -15,6 +15,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from mcp_client import load_mcp_config
+
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT / "config" / "harnesses.json"
 GUIDELINES_PATH = ROOT / "guidelines" / "auto-research.org"
@@ -33,10 +35,8 @@ def load_dotenv(path: Path) -> None:
         if "=" not in line:
             continue
         key, value = line.split("=", 1)
-        key = key.strip()
         value = value.strip().strip('"').strip("'")
-        value = os.path.expandvars(os.path.expanduser(value))
-        os.environ.setdefault(key, value)
+        os.environ.setdefault(key.strip(), os.path.expandvars(os.path.expanduser(value)))
 
 
 def load_config() -> dict[str, Any]:
@@ -56,8 +56,7 @@ def read_org_section(path: Path, heading: str) -> str:
 
 
 def org_keyword(path: Path, key: str, default: str | None = None) -> str | None:
-    rx = re.compile(rf"^#\+{re.escape(key)}:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
-    match = rx.search(path.read_text())
+    match = re.search(rf"^#\+{re.escape(key)}:\s*(.+?)\s*$", path.read_text(), re.IGNORECASE | re.MULTILINE)
     return match.group(1).strip() if match else default
 
 
@@ -68,16 +67,12 @@ def resolve_case(case_arg: str) -> tuple[str, Path, str]:
     if not candidate.exists():
         raise SystemExit(f"case not found: {case_arg}")
     case_id = org_keyword(candidate, "lab_id", candidate.stem) or candidate.stem
-    question = read_org_section(candidate, "Question")
-    return case_id, candidate, question
+    return case_id, candidate, read_org_section(candidate, "Question")
 
 
 def selected_harnesses(config: dict[str, Any], value: str | None) -> list[str]:
-    if value:
-        ids = [item.strip() for item in value.split(",") if item.strip()]
-    else:
-        ids = list(config["default_harnesses"])
-    unknown = [h for h in ids if h not in config["harnesses"]]
+    ids = [item.strip() for item in value.split(",") if item.strip()] if value else list(config["default_harnesses"])
+    unknown = [hid for hid in ids if hid not in config["harnesses"]]
     if unknown:
         raise SystemExit(f"unknown harness(es): {', '.join(unknown)}")
     return ids
@@ -114,7 +109,7 @@ def setup_one(harness_id: str, spec: dict[str, Any]) -> None:
     target = ensure_checkout(harness_id, spec)
     adapter = spec["adapter"]
     if adapter == "starintel":
-        print(f"{harness_id}: source pinned at {target}; Common Lisp runtime remains managed by the StarIntel harness.")
+        print(f"{harness_id}: pinned at {target}; CL runtime comes from AR_RUNTIME_SOURCE")
         return
     if shutil.which("uv") is None:
         raise SystemExit("uv is required for Python harness setup")
@@ -131,7 +126,7 @@ def setup_one(harness_id: str, spec: dict[str, Any]) -> None:
         run_checked(["uv", "pip", "install", "--python", str(py), "-r", str(req)])
         run_checked(["uv", "pip", "install", "--python", str(py), "-e", f"{target}[dev]"])
     else:
-        print(f"{harness_id}: adapter '{adapter}' is scaffolded but has no setup recipe yet")
+        print(f"{harness_id}: adapter '{adapter}' is scaffolded but has no setup recipe")
 
 
 def missing_env(spec: dict[str, Any]) -> list[str]:
@@ -141,22 +136,41 @@ def missing_env(spec: dict[str, Any]) -> list[str]:
 def doctor(config: dict[str, Any]) -> int:
     print(f"lab root: {lab_root()}")
     print(f"default model: {os.environ.get('RESEARCH_LAB_MODEL', config['default_model'])}")
-    print(f"OPENROUTER_API_KEY: {'set' if os.environ.get('OPENROUTER_API_KEY') else 'MISSING'}")
-    print(f"git: {shutil.which('git') or 'MISSING'}")
-    print(f"uv: {shutil.which('uv') or 'MISSING'}")
     bad = False
+    for name in ("git", "uv", "npx", "uvx"):
+        found = shutil.which(name)
+        print(f"{name}: {found or 'MISSING'}")
+        bad = bad or found is None
+    for key in ("OPENROUTER_API_KEY", "BRAVE_API_KEY"):
+        present = bool(os.environ.get(key))
+        print(f"{key}: {'set' if present else 'MISSING'}")
+        bad = bad or not present
+    try:
+        mcp = load_mcp_config()
+        print(
+            "MCP: "
+            + ", ".join(
+                f"{sid}={spec.get('package')}@{spec.get('version')}" for sid, spec in mcp["servers"].items()
+            )
+        )
+    except Exception as exc:
+        print(f"MCP: INVALID ({exc})")
+        bad = True
     for hid, spec in config["harnesses"].items():
-        state = "enabled" if spec.get("enabled") else "disabled"
+        enabled = bool(spec.get("enabled"))
         missing = missing_env(spec)
         checkout = upstream_dir(hid)
-        ready = checkout.exists()
-        if spec["adapter"] == "starintel":
-            native = Path(os.environ.get("STARINTEL_AUTO_RESEARCH_PATH", "")).expanduser()
-            ready = ready or (native / "bin" / "research").exists()
-        marker = "OK" if ready and not missing else "NEEDS-SETUP"
-        if spec.get("enabled") and missing:
+        runtime_ready = checkout.exists()
+        if spec["adapter"] != "starintel":
+            runtime_ready = runtime_ready and venv_python(hid).exists()
+        marker = "OK" if runtime_ready and not missing else "NEEDS-SETUP"
+        print(
+            f"{hid:18} {marker:11} {'enabled' if enabled else 'disabled':8} "
+            f"retrieval={spec.get('retrieval_mode', '-')} missing={','.join(missing) or '-'}"
+        )
+        if enabled and (missing or not runtime_ready):
             bad = True
-        print(f"{hid:18} {marker:11} {state:8} missing={','.join(missing) or '-'}")
+    print("run './bin/research-mcp doctor' for live MCP initialize/tool-discovery checks")
     return 1 if bad else 0
 
 
@@ -173,6 +187,9 @@ def build_request(
         "Follow the Auto Research controlled-test contract below.\n\n"
         "=== AUTO RESEARCH CONTRACT ===\n"
         f"{guidelines}\n\n"
+        "=== CONTROLLED RETRIEVAL CONTRACT ===\n"
+        "LLM inference: OpenRouter. Search: Brave Search MCP. Page retrieval: Fetch MCP. "
+        "Do not fall back to Tavily, Serper, SerpAPI, Google, Bing, Jina, MinerU, or an upstream hosted scraper.\n\n"
         "=== RESEARCH TASK ===\n"
         f"{question}\n"
     )
@@ -186,6 +203,8 @@ def build_request(
         "model": model,
         "provider": "openrouter",
         "api_base": OPENROUTER_BASE,
+        "search": "mcp:brave/brave_web_search",
+        "fetch": "mcp:fetch/fetch",
         "timeout_seconds": timeout,
     }
 
@@ -195,29 +214,39 @@ def command_for(
     spec: dict[str, Any],
     request_path: Path,
     output_dir: Path,
+    *,
+    dry_run: bool = False,
 ) -> tuple[list[str], Path, dict[str, str]]:
-    adapter = spec["adapter"]
     env = os.environ.copy()
     env["RESEARCH_LAB_HARNESS"] = harness_id
     env["RESEARCH_LAB_OUTPUT"] = str(output_dir)
+    env["RESEARCH_MCP_CONFIG"] = env.get("RESEARCH_MCP_CONFIG", str(ROOT / "mcp" / "servers.json"))
     env["OPENAI_API_KEY"] = env.get("OPENROUTER_API_KEY", "")
     env["OPENAI_BASE_URL"] = OPENROUTER_BASE
-    env["SERPER_API_KEY"] = env.get("SERPER_API_KEY") or env.get("SERPER_KEY", "")
+    adapter = spec["adapter"]
 
     if adapter == "starintel":
-        native = Path(env.get("STARINTEL_AUTO_RESEARCH_PATH", "")).expanduser()
-        target = native if (native / "bin" / "research").exists() else upstream_dir(harness_id)
         request = json.loads(request_path.read_text())
         env["AR_MODEL"] = request["model"]
-        env["AR_DEFAULT_PROJECT"] = env.get("STARINTEL_PROJECT", "auto-research")
-        env["AR_CORPUS_ROOT"] = str(target)
-        cmd = [str(target / "bin" / "research"), "-p", env["AR_DEFAULT_PROJECT"], request["prompt"]]
-        return cmd, target, env
+        project = env.get("STARINTEL_PROJECT", "auto-research")
+        cmd = [
+            sys.executable,
+            str(ROOT / "scripts" / "starintel_entry.py"),
+            "--request",
+            str(request_path),
+            "--output",
+            str(output_dir),
+            "--project",
+            project,
+        ]
+        return cmd, ROOT, env
 
     py = venv_python(harness_id)
-    if not py.exists():
+    if not py.exists() and not dry_run:
         raise RuntimeError(f"{harness_id}: missing venv; run 'research-lab setup --harnesses {harness_id}'")
     target = upstream_dir(harness_id)
+    if not target.exists() and not dry_run:
+        raise RuntimeError(f"{harness_id}: missing pinned checkout; run 'research-lab setup --harnesses {harness_id}'")
     cmd = [
         str(py),
         str(ROOT / "scripts" / "adapter_entry.py"),
@@ -229,7 +258,7 @@ def command_for(
         "--output",
         str(output_dir),
     ]
-    return cmd, target, env
+    return cmd, target if target.exists() else ROOT, env
 
 
 async def exec_process(
@@ -276,21 +305,22 @@ async def run_one(
         req_path = out / "request.json"
         req_path.write_text(json.dumps({**request, "harness_id": harness_id, "run_id": run_id}, indent=2) + "\n")
 
-        missing = missing_env(spec)
-        if missing:
-            result = {
-                "schema": "research-harness-test.result.v1",
-                "harness_id": harness_id,
-                "run_id": run_id,
-                "status": "failed" if strict else "skipped",
-                "reason": f"missing environment: {', '.join(missing)}",
-            }
-            (out / "result.json").write_text(json.dumps(result, indent=2) + "\n")
-            print(f"[{harness_id}] {result['status']}: {result['reason']}")
-            return result
+        if not dry_run:
+            missing = missing_env(spec)
+            if missing:
+                result = {
+                    "schema": "research-harness-test.result.v1",
+                    "harness_id": harness_id,
+                    "run_id": run_id,
+                    "status": "failed" if strict else "skipped",
+                    "reason": f"missing environment: {', '.join(missing)}",
+                }
+                (out / "result.json").write_text(json.dumps(result, indent=2) + "\n")
+                print(f"[{harness_id}] {result['status']}: {result['reason']}")
+                return result
 
         try:
-            cmd, cwd, env = command_for(harness_id, spec, req_path, out)
+            cmd, cwd, env = command_for(harness_id, spec, req_path, out, dry_run=dry_run)
         except Exception as exc:
             result = {
                 "schema": "research-harness-test.result.v1",
@@ -311,13 +341,14 @@ async def run_one(
                 "run_id": run_id,
                 "status": "planned",
                 "model": request["model"],
+                "retrieval": config["retrieval"],
                 "argv": cmd,
             }
             (out / "result.json").write_text(json.dumps(result, indent=2) + "\n")
             print(f"[{harness_id}] planned")
             return result
 
-        print(f"[{harness_id}] running {request['model']}")
+        print(f"[{harness_id}] running {request['model']} with Brave+Fetch MCP")
         code, timed_out, duration = await exec_process(
             cmd,
             cwd=cwd,
@@ -328,9 +359,12 @@ async def run_one(
         )
         report_path = out / "report.md"
         if not report_path.exists():
-            stdout_text = (out / "stdout.log").read_text(errors="replace")
-            report_path.write_text(stdout_text)
+            report_path.write_text((out / "stdout.log").read_text(errors="replace"))
         status = "timeout" if timed_out else ("completed" if code == 0 else "failed")
+        reason = None
+        if status == "completed" and not (out / "mcp.json").exists():
+            status = "failed"
+            reason = "controlled run completed without mcp.json; retrieval contract was not proven"
         result = {
             "schema": "research-harness-test.result.v1",
             "harness_id": harness_id,
@@ -342,9 +376,13 @@ async def run_one(
             "duration_seconds": round(duration, 3),
             "model": request["model"],
             "provider": "openrouter",
+            "retrieval": config["retrieval"],
+            "retrieval_mode": spec.get("retrieval_mode"),
             "report": str(report_path.relative_to(ROOT)),
             "upstream_ref": spec["ref"],
         }
+        if reason:
+            result["reason"] = reason
         adapter_meta = out / "adapter-result.json"
         if adapter_meta.exists():
             try:
@@ -361,14 +399,13 @@ async def matrix(args: argparse.Namespace, config: dict[str, Any]) -> int:
     model = args.model or os.environ.get("RESEARCH_LAB_MODEL") or config["default_model"]
     timeout = args.timeout or int(os.environ.get("RESEARCH_LAB_TIMEOUT", config["default_timeout_seconds"]))
     parallel = args.parallel or int(os.environ.get("RESEARCH_LAB_PARALLEL", config["default_parallel"]))
-    guidelines = GUIDELINES_PATH.read_text()
     request = build_request(
         case_id=case_id,
         case_path=case_path,
         question=question,
         model=model,
         timeout=timeout,
-        guidelines=guidelines,
+        guidelines=GUIDELINES_PATH.read_text(),
     )
     ids = selected_harnesses(config, args.harnesses)
     semaphore = asyncio.Semaphore(parallel)
@@ -387,28 +424,25 @@ async def matrix(args: argparse.Namespace, config: dict[str, Any]) -> int:
     )
     completed = sum(r["status"] == "completed" for r in results)
     failed = [r for r in results if r["status"] in {"failed", "timeout"}]
-    print(f"matrix: {completed}/{len(results)} completed; {len(failed)} failed/timeout")
+    planned = sum(r["status"] == "planned" for r in results)
+    print(f"matrix: {completed}/{len(results)} completed; {planned} planned; {len(failed)} failed/timeout")
     return 1 if failed else 0
 
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="research-lab")
     sub = p.add_subparsers(dest="command", required=True)
-
     setup = sub.add_parser("setup", help="clone pinned upstreams and create isolated Python venvs")
     setup.add_argument("--harnesses", help="comma-separated harness ids; defaults to matrix set")
-
-    sub.add_parser("doctor", help="check keys, checkouts, and local tooling")
-
+    sub.add_parser("doctor", help="check keys, MCP pins, checkouts, and local tooling")
     mx = sub.add_parser("matrix", help="run several harnesses concurrently")
     mx.add_argument("--case", required=True)
     mx.add_argument("--harnesses", help="comma-separated harness ids")
     mx.add_argument("--parallel", type=int)
     mx.add_argument("--model")
     mx.add_argument("--timeout", type=int)
-    mx.add_argument("--strict", action="store_true", help="missing harness prerequisites count as failures")
-    mx.add_argument("--dry-run", action="store_true", help="write plans without spending API money")
-
+    mx.add_argument("--strict", action="store_true")
+    mx.add_argument("--dry-run", action="store_true", help="write plans without requiring credentials or harness setup")
     run = sub.add_parser("run", help="run one harness")
     run.add_argument("--case", required=True)
     run.add_argument("--harness", required=True)
@@ -426,6 +460,7 @@ def main() -> int:
     if args.command == "setup":
         for hid in selected_harnesses(config, args.harnesses):
             setup_one(hid, config["harnesses"][hid])
+        print("upstreams ready; run './bin/research-mcp doctor' to probe the pinned MCP servers")
         return 0
     if args.command == "doctor":
         return doctor(config)
