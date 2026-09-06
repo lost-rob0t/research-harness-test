@@ -1,0 +1,3 @@
+#+title: Research Harness Test Lab
+
+Concurrent deep-research harness comparison lab. See =lab.org=.
