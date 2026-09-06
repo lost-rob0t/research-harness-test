@@ -17,7 +17,7 @@
   "harnesses": {
     "starintel": {
       "name": "StarIntel Auto Research CL",
-      "repo": "git@git.starintel.actor:starintel-labs/auto-research-llm-cl.git",
+      "repo": "https://git.starintel.actor/starintel-labs/auto-research-llm-cl.git",
       "ref": "c80c585b82625a90c559e5b1e7100064dc899431",
       "adapter": "starintel",
       "enabled": true,
