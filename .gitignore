@@ -1,0 +1,8 @@
+.env
+.lab/
+runs/
+__pycache__/
+*.pyc
+.venv/
+.direnv/
+result-cache/
