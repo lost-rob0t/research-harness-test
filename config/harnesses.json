@@ -18,7 +18,7 @@
     "starintel": {
       "name": "StarIntel Auto Research CL",
       "repo": "git@git.starintel.actor:starintel-labs/auto-research-llm-cl.git",
-      "ref": "159441f478259996bbfe4290800dbc280c43ad6a",
+      "ref": "c80c585b82625a90c559e5b1e7100064dc899431",
       "adapter": "starintel",
       "enabled": true,
       "required_env": ["OPENROUTER_API_KEY", "BRAVE_API_KEY", "AR_RUNTIME_SOURCE"],
