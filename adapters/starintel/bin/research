@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+LAB_REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
+LAB_ROOT="${RESEARCH_LAB_ROOT:-$LAB_REPO/.lab}"
+UPSTREAM="$LAB_ROOT/upstreams/starintel"
+OUTPUT="${RESEARCH_LAB_OUTPUT:-}"
+
+if [ ! -x "$UPSTREAM/bin/research" ]; then
+  echo "starintel adapter: pinned checkout missing; run: bash bin/research-lab setup --harnesses starintel" >&2
+  exit 2
+fi
+if [ -z "$OUTPUT" ]; then
+  echo "starintel adapter: RESEARCH_LAB_OUTPUT is required" >&2
+  exit 2
+fi
+if [ -z "${AR_RUNTIME_SOURCE:-}" ]; then
+  echo "starintel adapter: AR_RUNTIME_SOURCE is required" >&2
+  exit 2
+fi
+
+mkdir -p "$OUTPUT"
+CORPUS="$OUTPUT/starintel-corpus"
+MARKER="$OUTPUT/.starintel-start"
+NATIVE_STDOUT="$OUTPUT/starintel-native.stdout.log"
+NATIVE_STDERR="$OUTPUT/starintel-native.stderr.log"
+
+# One clean corpus per benchmark run.  No durable writes land in the developer
+# checkout or the shared pinned checkout.
+git -C "$UPSTREAM" worktree add --detach "$CORPUS" HEAD >/dev/null
+
+# Each run gets its own daemon identity.  This also permits multiple StarIntel
+# replicas in the same wider benchmark without sharing process state.
+slot="$(printf '%s' "$OUTPUT" | cksum | awk '{print $1 % 900}')"
+export AR_CORPUS_ROOT="$CORPUS"
+export AR_WEB_PORT="$((18080 + slot))"
+export AR_PIDFILE="$OUTPUT/starintel-daemon.pid"
+export AR_LOGFILE="$OUTPUT/starintel-daemon.log"
+
+cleanup() {
+  set +e
+  if [ -x "$CORPUS/bin/research" ]; then
+    "$CORPUS/bin/research" stop >/dev/null 2>&1
+  fi
+  git -C "$UPSTREAM" worktree remove --force "$CORPUS" >/dev/null 2>&1
+}
+trap cleanup EXIT
+
+: > "$MARKER"
+
+set +e
+"$CORPUS/bin/research" "$@" \
+  > >(tee "$NATIVE_STDOUT") \
+  2> >(tee "$NATIVE_STDERR" >&2)
+rc=$?
+set -e
+
+ARTIFACT_ROOT="$OUTPUT/native-artifacts"
+mkdir -p "$ARTIFACT_ROOT"
+while IFS= read -r path; do
+  rel="${path#"$CORPUS/"}"
+  dest="$ARTIFACT_ROOT/$rel"
+  mkdir -p "$(dirname "$dest")"
+  cp "$path" "$dest"
+done < <(find "$CORPUS/roam" -type f -newer "$MARKER" -print 2>/dev/null || true)
+
+latest=""
+if [ -d "$CORPUS/roam/research" ]; then
+  latest="$(find "$CORPUS/roam/research" -type f -name '*.org' -newer "$MARKER" -printf '%T@ %p\n' 2>/dev/null \
+    | sort -nr | head -n1 | cut -d' ' -f2- || true)"
+fi
+if [ -z "$latest" ] && [ -d "$CORPUS/roam/design" ]; then
+  latest="$(find "$CORPUS/roam/design" -type f -name '*.org' -newer "$MARKER" -printf '%T@ %p\n' 2>/dev/null \
+    | sort -nr | head -n1 | cut -d' ' -f2- || true)"
+fi
+
+artifact_rel=""
+if [ -n "$latest" ]; then
+  cp "$latest" "$OUTPUT/report.md"
+  artifact_rel="${latest#"$CORPUS/"}"
+elif [ -s "$NATIVE_STDOUT" ]; then
+  cp "$NATIVE_STDOUT" "$OUTPUT/report.md"
+fi
+
+run_id="$(sed -n 's/^run \([^ ]*\) queued.*/\1/p' "$NATIVE_STDOUT" | tail -n1)"
+native_status="$(sed -n 's/^== run [^:]*: \([^ ]*\) ==$/\1/p' "$NATIVE_STDOUT" | tail -n1)"
+python3 - "$OUTPUT/adapter-result.json" "$run_id" "$native_status" "$artifact_rel" "$AR_WEB_PORT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path, run_id, status, artifact, port = sys.argv[1:]
+Path(path).write_text(json.dumps({
+    "adapter": "starintel-auto-research-cl",
+    "native_run_id": run_id or None,
+    "native_status": status or None,
+    "source_artifact": artifact or None,
+    "artifact_capture": "newer-than-run-marker",
+    "isolated_corpus": True,
+    "isolated_port": int(port),
+}, indent=2) + "\n")
+PY
+
+rm -f "$MARKER"
+exit "$rc"
