@@ -18,7 +18,9 @@
             jq
             curl
             sbcl
+            openssl
           ];
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ pkgs.openssl ];
           shellHook = ''
             echo "research-harness-test: OpenRouter + Brave Search MCP + Fetch MCP"
             echo "MCP pins: Brave 2.1.3; Fetch 2026.8.18"
