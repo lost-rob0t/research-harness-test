@@ -7,6 +7,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,22 @@ def lab_root() -> Path:
 def run(cmd: list[str], *, cwd: Path | None = None) -> None:
     print("+", shlex.join(cmd))
     subprocess.run(cmd, cwd=cwd, check=True)
+
+
+def run_retry(cmd: list[str], *, cwd: Path | None = None, attempts: int = 2) -> None:
+    last: subprocess.CalledProcessError | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            run(cmd, cwd=cwd)
+            return
+        except subprocess.CalledProcessError as exc:
+            last = exc
+            if attempt >= attempts:
+                raise
+            print(f"[setup] command failed; retrying ({attempt}/{attempts})")
+            time.sleep(1)
+    if last is not None:
+        raise last
 
 
 def load_config() -> dict[str, Any]:
@@ -53,7 +70,12 @@ def repair_origin(harness_id: str, spec: dict[str, Any]) -> None:
     if not (target / ".git").exists():
         return
     desired = spec["repo"]
-    current = subprocess.check_output(["git", "remote", "get-url", "origin"], cwd=target, text=True).strip()
+    try:
+        current = subprocess.check_output(["git", "remote", "get-url", "origin"], cwd=target, text=True).strip()
+    except subprocess.CalledProcessError:
+        print(f"[setup] {harness_id}: adding origin -> {desired}")
+        run(["git", "remote", "add", "origin", desired], cwd=target)
+        return
     if current != desired:
         print(f"[setup] {harness_id}: origin -> {desired}")
         run(["git", "remote", "set-url", "origin", desired], cwd=target)
@@ -84,13 +106,33 @@ def env_ready(harness_id: str, spec: dict[str, Any]) -> bool:
     return data == {"recipe_version": RECIPE_VERSION, "upstream_ref": spec["ref"]}
 
 
+def clone_checkout(harness_id: str, spec: dict[str, Any], target: Path) -> None:
+    # A failed clone may leave a non-repository directory behind. This tree is
+    # lab-owned scratch state, so discard it rather than forcing manual cleanup.
+    if target.exists() and not (target / ".git").exists():
+        print(f"[setup] {harness_id}: removing incomplete checkout {target}")
+        shutil.rmtree(target)
+
+    for attempt in (1, 2):
+        try:
+            run(["git", "clone", "--filter=blob:none", spec["repo"], str(target)])
+            return
+        except subprocess.CalledProcessError:
+            if target.exists() and not (target / ".git").exists():
+                shutil.rmtree(target)
+            if attempt == 2:
+                raise
+            print(f"[setup] {harness_id}: clone failed; retrying once")
+            time.sleep(1)
+
+
 def ensure_checkout(harness_id: str, spec: dict[str, Any]) -> Path:
     target = checkout_path(harness_id)
     target.parent.mkdir(parents=True, exist_ok=True)
     if not (target / ".git").exists():
-        run(["git", "clone", "--filter=blob:none", spec["repo"], str(target)])
+        clone_checkout(harness_id, spec, target)
     repair_origin(harness_id, spec)
-    run(["git", "fetch", "--tags", "--prune", "origin"], cwd=target)
+    run_retry(["git", "fetch", "--tags", "--prune", "origin"], cwd=target)
     run(["git", "checkout", "--detach", spec["ref"]], cwd=target)
     return target
 
