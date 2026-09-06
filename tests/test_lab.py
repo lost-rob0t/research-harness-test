@@ -60,18 +60,22 @@ class ResearchLabTests(unittest.TestCase):
         self.assertIn("CONTROLLED RETRIEVAL CONTRACT", request["prompt"])
         self.assertIn(question, request["prompt"])
 
-    def test_config_is_json_refs_are_pinned_and_remotes_follow_ssh_policy(self) -> None:
+    def test_config_is_json_refs_are_pinned_and_remotes_follow_host_policy(self) -> None:
         config = json.loads((ROOT / "config" / "harnesses.json").read_text())
 
         self.assertEqual(
             config["harnesses"]["starintel"]["repo"],
-            "git@git.starintel.actor:starintel-labs/auto-research-llm-cl.git",
+            "https://git.starintel.actor/starintel-labs/auto-research-llm-cl.git",
         )
 
         for harness_id, spec in config["harnesses"].items():
             repo = spec["repo"]
-            self.assertFalse(repo.startswith("http://") or repo.startswith("https://"), f"{harness_id} must not use HTTP(S)")
-            if harness_id != "starintel":
+            if harness_id == "starintel":
+                self.assertTrue(
+                    repo.startswith("https://git.starintel.actor/"),
+                    f"{harness_id} must use Forgejo HTTPS, got {repo}",
+                )
+            else:
                 self.assertTrue(
                     repo.startswith("ssh://git@ssh.github.com:443/"),
                     f"{harness_id} must use GitHub SSH over 443, got {repo}",
@@ -89,7 +93,7 @@ class ResearchLabTests(unittest.TestCase):
         self.assertIn("makeLibraryPath [ pkgs.openssl ]", flake)
         self.assertIn("swi-prolog", flake)
         self.assertIn("PROLOG_RLM_SWIPL", flake)
-        self.assertIn("git+ssh://git@git.starintel.actor/nsaspy/prolog-rlm.git", flake)
+        self.assertIn("git+https://git.starintel.actor/nsaspy/prolog-rlm.git", flake)
         self.assertIn("e1ed6c2b5f717d9bb380fcf22d144737299197f8", flake)
 
     def test_python_entrypoints_compile(self) -> None:
