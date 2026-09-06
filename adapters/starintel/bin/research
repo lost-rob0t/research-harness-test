@@ -75,10 +75,54 @@ set -e
 run_id="$(sed -n 's/^run \([^ ]*\) queued.*/\1/p' "$NATIVE_STDOUT" | tail -n1)"
 native_status="$(sed -n 's/^== run [^:]*: \([^ ]*\) ==$/\1/p' "$NATIVE_STDOUT" | tail -n1)"
 
+# Capture the raw append-only event ledger before the worktree is removed.
+# The current HTTP event projection intentionally omits payload, which is
+# exactly where rlm.failed stores the provider/bridge failure detail.
+if [ -s "$CORPUS/.ar-events.jsonl" ]; then
+  cp "$CORPUS/.ar-events.jsonl" "$OUTPUT/starintel-events-raw.jsonl"
+  python3 - "$OUTPUT/starintel-events-raw.jsonl" "$run_id" <<'PY' >&2 || true
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+run_id = sys.argv[2]
+failed = []
+for raw in path.read_text(errors="replace").splitlines():
+    try:
+        event = json.loads(raw)
+    except json.JSONDecodeError:
+        continue
+    if run_id and event.get("entity_id") != run_id:
+        continue
+    if event.get("type") == "rlm.failed":
+        failed.append(event)
+if failed:
+    print("=== starintel raw rlm.failed ===")
+    print(json.dumps(failed[-1], indent=2, ensure_ascii=False))
+PY
+fi
+
+# cl-prolog-rlm writes bridge stderr to PID/UUID-scoped files in /tmp. Keep
+# only files created during this benchmark run, so Prolog boot/provider errors
+# survive daemon teardown and are associated with the run artifact.
+BRIDGE_DIR="$OUTPUT/rlm-bridge-stderr"
+mkdir -p "$BRIDGE_DIR"
+while IFS= read -r path; do
+  cp "$path" "$BRIDGE_DIR/$(basename "$path")"
+done < <(find /tmp -maxdepth 1 -type f -name 'rlm-bridge-stderr-*.log' -newer "$MARKER" -print 2>/dev/null || true)
+if compgen -G "$BRIDGE_DIR/rlm-bridge-stderr-*.log" >/dev/null; then
+  newest="$(find "$BRIDGE_DIR" -type f -name 'rlm-bridge-stderr-*.log' -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)"
+  if [ -s "$newest" ]; then
+    echo "=== starintel RLM bridge stderr ===" >&2
+    cat "$newest" >&2
+  fi
+fi
+
 # Capture the authoritative API payloads while the isolated daemon is still
 # alive. The pinned upstream CLI currently prints only event names and can
 # itself fail while formatting candidates, which used to hide the real RLM
-# error. These files make provider/bridge failures directly inspectable.
+# error. These files retain the public projections alongside the raw ledger.
 if [ -n "$run_id" ]; then
   curl -sS -m 10 -H "Authorization: Bearer $TOKEN" \
     "$API/runs/$run_id" > "$OUTPUT/starintel-run.json" || true
@@ -110,7 +154,7 @@ fi
 
 # Preserve and surface the full daemon log on native failure, not only
 # upstream's final stack frames. Startup failures and runtime failures are
-# both retained, while the API snapshots above carry structured run errors.
+# both retained, while the raw ledger/bridge stderr carry semantic failures.
 if (( rc != 0 )) && [ -s "$AR_LOGFILE" ]; then
   echo "=== starintel daemon log ===" >&2
   sed -n '1,160p' "$AR_LOGFILE" >&2
@@ -173,7 +217,9 @@ Path(path).write_text(json.dumps({
     "benchmark_source_isolation": True,
     "native_run_snapshot": "starintel-run.json" if run_id else None,
     "native_events_snapshot": "starintel-events.json" if run_id else None,
+    "native_events_raw": "starintel-events-raw.jsonl" if Path(path).with_name("starintel-events-raw.jsonl").exists() else None,
     "native_candidates_snapshot": "starintel-candidates.json" if run_id else None,
+    "rlm_bridge_stderr_dir": "rlm-bridge-stderr",
 }, indent=2) + "\n")
 PY
 
