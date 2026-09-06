@@ -3,11 +3,13 @@ from __future__ import annotations
 import importlib.util
 import json
 import py_compile
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
 SPEC = importlib.util.spec_from_file_location("research_lab", ROOT / "scripts" / "research_lab.py")
 assert SPEC and SPEC.loader
 lab = importlib.util.module_from_spec(SPEC)
