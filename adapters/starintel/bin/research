@@ -18,6 +18,10 @@ if [ -z "${AR_RUNTIME_SOURCE:-}" ]; then
   echo "starintel adapter: AR_RUNTIME_SOURCE is required" >&2
   exit 2
 fi
+if [ ! -d "$AR_RUNTIME_SOURCE" ]; then
+  echo "starintel adapter: AR_RUNTIME_SOURCE is not an existing directory: $AR_RUNTIME_SOURCE" >&2
+  exit 2
+fi
 
 mkdir -p "$OUTPUT"
 CORPUS="$OUTPUT/starintel-corpus"
@@ -25,11 +29,22 @@ MARKER="$OUTPUT/.starintel-start"
 NATIVE_STDOUT="$OUTPUT/starintel-native.stdout.log"
 NATIVE_STDERR="$OUTPUT/starintel-native.stderr.log"
 
-# One clean corpus per benchmark run.  No durable writes land in the developer
+# One clean corpus per benchmark run. No durable writes land in the developer
 # checkout or the shared pinned checkout.
 git -C "$UPSTREAM" worktree add --detach "$CORPUS" HEAD >/dev/null
 
-# Each run gets its own daemon identity.  This also permits multiple StarIntel
+# The pinned StarIntel corpus validates every configured project's source path
+# while loading trusted config, even though this benchmark invokes only the
+# auto-research project. Keep the real auto-research runtime source, while
+# satisfying those unrelated project registrations with isolated empty dirs.
+# Explicit caller overrides still win.
+BENCH_SOURCE_ROOT="$OUTPUT/starintel-benchmark-sources"
+mkdir -p "$BENCH_SOURCE_ROOT/prolog-rlm" "$BENCH_SOURCE_ROOT/star-lang"
+export AR_HARNESS_SOURCE="${AR_HARNESS_SOURCE:-$AR_RUNTIME_SOURCE}"
+export AR_PROLOG_RLM_SOURCE="${AR_PROLOG_RLM_SOURCE:-$BENCH_SOURCE_ROOT/prolog-rlm}"
+export AR_STAR_LANG_SOURCE="${AR_STAR_LANG_SOURCE:-$BENCH_SOURCE_ROOT/star-lang}"
+
+# Each run gets its own daemon identity. This also permits multiple StarIntel
 # replicas in the same wider benchmark without sharing process state.
 slot="$(printf '%s' "$OUTPUT" | cksum | awk '{print $1 % 900}')"
 export AR_CORPUS_ROOT="$CORPUS"
@@ -54,6 +69,18 @@ set +e
   2> >(tee "$NATIVE_STDERR" >&2)
 rc=$?
 set -e
+
+# Preserve and surface the full daemon failure, not only upstream's final
+# 15 stack frames. This turns future startup failures into actionable output.
+if (( rc != 0 )) && [ -s "$AR_LOGFILE" ]; then
+  echo "=== starintel daemon failure ===" >&2
+  sed -n '1,120p' "$AR_LOGFILE" >&2
+  lines="$(wc -l < "$AR_LOGFILE")"
+  if (( lines > 120 )); then
+    echo "=== starintel daemon tail ===" >&2
+    tail -80 "$AR_LOGFILE" >&2
+  fi
+fi
 
 ARTIFACT_ROOT="$OUTPUT/native-artifacts"
 mkdir -p "$ARTIFACT_ROOT"
@@ -98,6 +125,7 @@ Path(path).write_text(json.dumps({
     "artifact_capture": "newer-than-run-marker",
     "isolated_corpus": True,
     "isolated_port": int(port),
+    "benchmark_source_isolation": True,
 }, indent=2) + "\n")
 PY
 
