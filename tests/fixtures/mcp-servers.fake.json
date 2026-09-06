@@ -1,0 +1,23 @@
+{
+  "schema": "research-harness-test.mcp.v1",
+  "servers": {
+    "brave": {
+      "name": "Fake Brave MCP",
+      "package": "fake-brave",
+      "version": "1",
+      "transport": "stdio",
+      "command": "python3",
+      "args": ["tests/fake_mcp_server.py"],
+      "env": {"FAKE_MCP_KIND": "brave"}
+    },
+    "fetch": {
+      "name": "Fake Fetch MCP",
+      "package": "fake-fetch",
+      "version": "1",
+      "transport": "stdio",
+      "command": "python3",
+      "args": ["tests/fake_mcp_server.py"],
+      "env": {"FAKE_MCP_KIND": "fetch"}
+    }
+  }
+}
