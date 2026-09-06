@@ -67,14 +67,38 @@ class MCPTests(unittest.TestCase):
                 with LabRetrieval(Path(td) / "out") as retrieval:
                     self.assertEqual(retrieval.search("anything"), [])
 
-    def test_timeout_kills_probe_cleanly(self) -> None:
+    def test_timeout_cleans_probe_process(self) -> None:
         payload = json.loads(FAKE_CONFIG.read_text())
         payload["servers"]["brave"]["env"]["FAKE_MCP_MODE"] = "delay"
         spec = payload["servers"]["brave"]
         client = MCPStdioClient("brave", spec, timeout=0.05)
         with self.assertRaises(MCPError):
             client.start()
+        self.assertIsNone(client.proc)
+
+    def test_dead_mcp_process_fails_fast(self) -> None:
+        payload = json.loads(FAKE_CONFIG.read_text())
+        client = MCPStdioClient("brave", payload["servers"]["brave"], timeout=2.0).start()
+        self.assertIsNotNone(client.proc)
+        assert client.proc is not None
+        client.proc.terminate()
+        client.proc.wait(timeout=2)
+        started = __import__("time").monotonic()
+        with self.assertRaises(MCPError):
+            client.call_tool("brave_web_search", {"query": "dead child", "count": 1})
+        self.assertLess(__import__("time").monotonic() - started, 0.5)
         client.close()
+
+    def test_partial_pair_startup_cleans_first_server(self) -> None:
+        payload = json.loads(FAKE_CONFIG.read_text())
+        payload["servers"]["fetch"]["command"] = "definitely-not-a-real-mcp-command"
+        with tempfile.TemporaryDirectory() as td:
+            config_path = Path(td) / "mcp.json"
+            config_path.write_text(json.dumps(payload))
+            retrieval = LabRetrieval(Path(td) / "out", config_path=config_path, timeout=0.5)
+            with self.assertRaises(OSError):
+                retrieval.start()
+            self.assertEqual(retrieval.clients, {})
 
     def test_public_metadata_never_resolves_secrets(self) -> None:
         config = load_mcp_config(ROOT / "mcp" / "servers.json")
