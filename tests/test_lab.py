@@ -82,6 +82,12 @@ class ResearchLabTests(unittest.TestCase):
             self.assertRegex(ref, r"^[0-9a-f]{40}$")
             self.assertIn("BRAVE_API_KEY", config["harnesses"][harness_id]["required_env"])
 
+    def test_nix_shell_exposes_openssl_to_cl_ssl(self) -> None:
+        flake = (ROOT / "flake.nix").read_text()
+        self.assertIn("openssl", flake)
+        self.assertIn("LD_LIBRARY_PATH", flake)
+        self.assertIn("makeLibraryPath [ pkgs.openssl ]", flake)
+
     def test_python_entrypoints_compile(self) -> None:
         for path in (
             "scripts/research_lab.py",
