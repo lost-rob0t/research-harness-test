@@ -1,0 +1,64 @@
+{
+  "schema": "research-harness-test.harnesses.v1",
+  "default_model": "z-ai/glm-5.3-flash",
+  "default_parallel": 4,
+  "default_timeout_seconds": 1800,
+  "default_harnesses": [
+    "starintel",
+    "researchharness",
+    "gpt-researcher",
+    "smolagents-odr"
+  ],
+  "harnesses": {
+    "starintel": {
+      "name": "StarIntel Auto Research CL",
+      "repo": "https://github.com/starintel-labs/auto-research-llm-cl.git",
+      "ref": "0ddee8d1bcf0120f083241c3cb69eaecbe69f623",
+      "adapter": "starintel",
+      "enabled": true,
+      "required_env": ["OPENROUTER_API_KEY"]
+    },
+    "researchharness": {
+      "name": "InternScience ResearchHarness",
+      "repo": "https://github.com/InternScience/ResearchHarness.git",
+      "ref": "72e8a44737aadabc8c3f9e5c7ea76883b9c7032f",
+      "adapter": "researchharness",
+      "enabled": true,
+      "required_env": ["OPENROUTER_API_KEY", "SERPER_KEY", "JINA_KEY", "MINERU_TOKEN"]
+    },
+    "gpt-researcher": {
+      "name": "GPT Researcher",
+      "repo": "https://github.com/assafelovic/gpt-researcher.git",
+      "ref": "6f998577d547b1e54ec662dac63583aa11e3b84b",
+      "adapter": "gpt_researcher",
+      "enabled": true,
+      "required_env": ["OPENROUTER_API_KEY", "TAVILY_API_KEY"]
+    },
+    "smolagents-odr": {
+      "name": "Hugging Face Open Deep Research",
+      "repo": "https://github.com/huggingface/smolagents.git",
+      "ref": "30bb1161095dbae2271e6bc3cc4c219cc3897a57",
+      "adapter": "smolagents_odr",
+      "enabled": true,
+      "required_env": ["OPENROUTER_API_KEY", "SERPAPI_API_KEY"]
+    },
+    "langchain-odr": {
+      "name": "LangChain Open Deep Research",
+      "repo": "https://github.com/langchain-ai/open_deep_research.git",
+      "ref": "main",
+      "adapter": "langchain_odr",
+      "enabled": false,
+      "required_env": ["OPENROUTER_API_KEY", "TAVILY_API_KEY"],
+      "note": "Scaffolded but excluded from the default matrix until its OpenRouter base/provider path is verified against the pinned checkout."
+    },
+    "storm": {
+      "name": "Stanford STORM",
+      "repo": "https://github.com/stanford-oval/storm.git",
+      "ref": "main",
+      "adapter": "storm",
+      "enabled": false,
+      "required_env": ["OPENROUTER_API_KEY"],
+      "note": "Scaffolded as a specialist comparison lane; not in the first controlled matrix."
+    }
+  }
+}
