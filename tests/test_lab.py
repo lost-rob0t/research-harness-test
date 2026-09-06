@@ -65,7 +65,7 @@ class ResearchLabTests(unittest.TestCase):
 
         self.assertEqual(
             config["harnesses"]["starintel"]["repo"],
-            "git@git.starintel.actor:starintel-labs/auto-research-llm-cl.git",
+            "forgejo@git.starintel.actor:starintel-labs/auto-research-llm-cl.git",
         )
 
         for harness_id, spec in config["harnesses"].items():
@@ -76,9 +76,10 @@ class ResearchLabTests(unittest.TestCase):
             )
             if harness_id == "starintel":
                 self.assertTrue(
-                    repo.startswith("git@git.starintel.actor:"),
-                    f"{harness_id} must use Forgejo SSH, got {repo}",
+                    repo.startswith("forgejo@git.starintel.actor:"),
+                    f"{harness_id} must use Forgejo SSH as forgejo@, got {repo}",
                 )
+                self.assertFalse(repo.startswith("git@git.starintel.actor:"))
             else:
                 self.assertTrue(
                     repo.startswith("ssh://git@ssh.github.com:443/"),
@@ -97,7 +98,8 @@ class ResearchLabTests(unittest.TestCase):
         self.assertIn("makeLibraryPath [ pkgs.openssl ]", flake)
         self.assertIn("swi-prolog", flake)
         self.assertIn("PROLOG_RLM_SWIPL", flake)
-        self.assertIn("git+ssh://git@git.starintel.actor/nsaspy/prolog-rlm.git", flake)
+        self.assertIn("git+ssh://forgejo@git.starintel.actor/nsaspy/prolog-rlm.git", flake)
+        self.assertNotIn("git+ssh://git@git.starintel.actor/", flake)
         self.assertNotIn("git+https://git.starintel.actor/", flake)
         self.assertIn("e1ed6c2b5f717d9bb380fcf22d144737299197f8", flake)
 
