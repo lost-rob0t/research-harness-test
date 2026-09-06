@@ -1,0 +1,128 @@
+#+title: Deep Research Harness Lab
+#+description: Concurrent controlled comparison of deep-research harnesses through OpenRouter.
+#+startup: overview
+#+property: header-args:sh :results output verbatim replace :exports both
+
+* Lab defaults
+
+- Model: =z-ai/glm-5.3-flash=
+- Provider: OpenRouter
+- Parallel harnesses: 4
+- Case: =DR-001=
+- Run outputs: =runs/<case>/<harness>/<run-id>/=
+- Pinned upstream checkouts: =.lab/upstreams/=
+- Isolated Python environments: =.lab/venvs/=
+
+The default controlled matrix runs these four implementations at the same time:
+
+| Harness | Role |
+|---------+------|
+| StarIntel Auto Research CL | Native harness under test |
+| InternScience ResearchHarness | General research-agent baseline |
+| GPT Researcher | Multi-step web research baseline |
+| Hugging Face Open Deep Research / smolagents | Search-agent + manager baseline |
+
+Every lane receives =guidelines/auto-research.org= plus the exact same case question.  The runner records the requested model, pinned upstream revision, elapsed time, stdout, stderr, report, adapter metadata, and request for every run.
+
+* One-time setup
+
+Copy the environment template and put the real keys only in =.env=.
+
+#+begin_src sh
+cp -n env.example .env
+${EDITOR:-emacs} .env
+#+end_src
+
+Clone the pinned implementations and build their isolated environments:
+
+#+begin_src sh
+bash bin/research-lab setup
+#+end_src
+
+Check the lab without spending model credits:
+
+#+begin_src sh
+bash bin/research-lab doctor
+#+end_src
+
+* Dry-run the four-way matrix
+
+This creates run plans and request artifacts but makes no LLM calls.
+
+#+begin_src sh
+bash bin/research-lab matrix \
+  --case DR-001 \
+  --parallel 4 \
+  --model z-ai/glm-5.3-flash \
+  --dry-run
+#+end_src
+
+* Run the controlled GLM-5.3-Flash shootout
+
+#+begin_src sh
+bash bin/research-lab matrix \
+  --case DR-001 \
+  --parallel 4 \
+  --model z-ai/glm-5.3-flash \
+  --strict
+#+end_src
+
+The four harnesses run concurrently, not sequentially.  =--parallel= controls the maximum number of active harness processes.
+
+* Run selected harnesses
+
+#+begin_src sh
+bash bin/research-lab matrix \
+  --case DR-001 \
+  --harnesses starintel,researchharness,gpt-researcher \
+  --parallel 3 \
+  --model z-ai/glm-5.3-flash
+#+end_src
+
+* Run only StarIntel
+
+#+begin_src sh
+bash bin/research-lab run \
+  --case DR-001 \
+  --harness starintel \
+  --model z-ai/glm-5.3-flash
+#+end_src
+
+* Run layout
+
+Each harness run writes a separate directory so concurrent writers never share result files.
+
+#+begin_example
+runs/DR-001/<harness>/<run-id>/
+  request.json
+  command.json
+  stdout.log
+  stderr.log
+  report.md
+  adapter-result.json     # when supplied by the adapter
+  result.json
+  traces/                 # harness-specific when available
+  workspace/              # harness-specific when available
+#+end_example
+
+* Controlled-test contract
+
+The shared instructions live in [[file:guidelines/auto-research.org][guidelines/auto-research.org]].  Cases contain the research question only.  This deliberately separates the benchmark contract from the benchmark task so every harness sees the same requirements.
+
+* Cases
+
+- [[file:cases/DR-001.org][DR-001]] — compare current open-source deep-research harness architectures.
+
+Add another =cases/DR-NNN.org= with =#+lab_id:= and a =* Question= heading to create another experiment.
+
+* Notes on fairness
+
+- GLM-5.3-Flash is forced for reasoning/generation wherever the upstream exposes model control.
+- Search APIs are still harness-native in this first lane: ResearchHarness uses its own tools, GPT Researcher uses Tavily by default, and the smolagents lane uses Serper.
+- The StarIntel lane runs from the lab's pinned checkout and uses its own isolated port/PID/log paths; it does not use the developer working tree.
+- Missing required credentials are reported before a paid run.  =--strict= converts missing prerequisites into matrix failures.
+- =--dry-run= is the no-money smoke-test path.
+
+* Future lanes
+
+=langchain-odr= and =storm= are already registered as disabled scaffolds in =config/harnesses.json=.  Enable them only after their OpenRouter model path and output capture are pinned and verified.
