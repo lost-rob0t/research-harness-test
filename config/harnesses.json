@@ -17,7 +17,7 @@
   "harnesses": {
     "starintel": {
       "name": "StarIntel Auto Research CL",
-      "repo": "https://github.com/starintel-labs/auto-research-llm-cl.git",
+      "repo": "git@github.com:starintel-labs/auto-research-llm-cl.git",
       "ref": "159441f478259996bbfe4290800dbc280c43ad6a",
       "adapter": "starintel",
       "enabled": true,
@@ -26,7 +26,7 @@
     },
     "researchharness": {
       "name": "InternScience ResearchHarness",
-      "repo": "https://github.com/InternScience/ResearchHarness.git",
+      "repo": "git@github.com:InternScience/ResearchHarness.git",
       "ref": "72e8a44737aadabc8c3f9e5c7ea76883b9c7032f",
       "adapter": "researchharness",
       "enabled": true,
@@ -35,7 +35,7 @@
     },
     "gpt-researcher": {
       "name": "GPT Researcher",
-      "repo": "https://github.com/assafelovic/gpt-researcher.git",
+      "repo": "git@github.com:assafelovic/gpt-researcher.git",
       "ref": "6f998577d547b1e54ec662dac63583aa11e3b84b",
       "adapter": "gpt_researcher",
       "enabled": true,
@@ -44,7 +44,7 @@
     },
     "smolagents-odr": {
       "name": "Hugging Face Open Deep Research",
-      "repo": "https://github.com/huggingface/smolagents.git",
+      "repo": "git@github.com:huggingface/smolagents.git",
       "ref": "30bb1161095dbae2271e6bc3cc4c219cc3897a57",
       "adapter": "smolagents_odr",
       "enabled": true,
@@ -53,7 +53,7 @@
     },
     "langchain-odr": {
       "name": "LangChain Open Deep Research",
-      "repo": "https://github.com/langchain-ai/open_deep_research.git",
+      "repo": "git@github.com:langchain-ai/open_deep_research.git",
       "ref": "main",
       "adapter": "langchain_odr",
       "enabled": false,
@@ -62,7 +62,7 @@
     },
     "storm": {
       "name": "Stanford STORM",
-      "repo": "https://github.com/stanford-oval/storm.git",
+      "repo": "git@github.com:stanford-oval/storm.git",
       "ref": "main",
       "adapter": "storm",
       "enabled": false,
