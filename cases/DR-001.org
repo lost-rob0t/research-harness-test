@@ -1,0 +1,11 @@
+#+title: DR-001 Harness Architecture Comparison
+#+lab_id: DR-001
+#+lab_tags: web architecture deep-research
+
+* Question
+
+Compare modern open-source deep-research LLM harness architectures. Identify how they plan research, perform search/retrieval, preserve evidence and citations, manage concurrency or subagents, bound loops/budgets, and synthesize final reports. Focus on concrete implementation behavior and current primary sources. Highlight architectural tradeoffs that matter when building a reproducible, auditable Auto Research system.
+
+* Evaluation notes
+
+This is the initial broad web-research case. It is intentionally architecture-heavy so all harnesses must search, compare multiple projects, reconcile implementation details, and cite evidence.
