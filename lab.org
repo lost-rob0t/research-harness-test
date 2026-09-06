@@ -1,96 +1,144 @@
 #+title: Deep Research Harness Lab
-#+description: Concurrent controlled comparison of deep-research harnesses through OpenRouter.
+#+description: Concurrent controlled comparison through OpenRouter + Brave Search MCP + Fetch MCP.
 #+startup: overview
 #+property: header-args:sh :results output verbatim replace :exports both
 
 * Lab defaults
 
-- Model: =z-ai/glm-5.3-flash=
-- Provider: OpenRouter
+- LLM: =z-ai/glm-5.3-flash= through OpenRouter
+- Search: =@brave/brave-search-mcp-server@2.1.3=
+- Fetch: =mcp-server-fetch==2026.8.18=
+- MCP transport: stdio
 - Parallel harnesses: 4
 - Case: =DR-001=
 - Run outputs: =runs/<case>/<harness>/<run-id>/=
-- Pinned upstream checkouts: =.lab/upstreams/=
-- Isolated Python environments: =.lab/venvs/=
 
-The default controlled matrix runs these four implementations at the same time:
+The default four-way matrix is:
 
-| Harness | Role |
-|---------+------|
-| StarIntel Auto Research CL | Native harness under test |
-| InternScience ResearchHarness | General research-agent baseline |
-| GPT Researcher | Multi-step web research baseline |
-| Hugging Face Open Deep Research / smolagents | Search-agent + manager baseline |
+| Harness | Controlled retrieval |
+|---------+----------------------|
+| StarIntel Auto Research CL | Brave+Fetch MCP bounded evidence prefetch; native MCP injection not exposed by current CL runtime |
+| InternScience ResearchHarness | Brave+Fetch MCP as the only two network tools |
+| GPT Researcher | custom retriever backed by Brave search + Fetch hydration |
+| Hugging Face Open Deep Research / smolagents | managed search agent with only Brave+Fetch MCP tools |
 
-Every lane receives =guidelines/auto-research.org= plus the exact same case question.  The runner records the requested model, pinned upstream revision, elapsed time, stdout, stderr, report, adapter metadata, and request for every run.
+Every lane receives the same =guidelines/auto-research.org= contract and case question.
 
-* One-time setup
-
-Copy the environment template and put the real keys only in =.env=.
+* One-time environment
 
 #+begin_src sh
 cp -n env.example .env
 ${EDITOR:-emacs} .env
 #+end_src
 
-Clone the pinned implementations and build their isolated environments:
+The normal controlled path needs only:
+
+#+begin_example
+OPENROUTER_API_KEY
+BRAVE_API_KEY
+#+end_example
+
+StarIntel additionally needs =AR_RUNTIME_SOURCE= pointing at its CL runtime source tree.
+
+* MCP doctor
+
+The MCP configuration is repo-local at =mcp/servers.json=. No global Claude/Codex MCP configuration is used.
+
+Show exact pins without starting anything:
 
 #+begin_src sh
-bash bin/research-lab setup
+./bin/research-mcp list
 #+end_src
 
-Check the lab without spending model credits:
+Initialize both real stdio servers, perform MCP tool discovery, then exit:
 
 #+begin_src sh
-bash bin/research-lab doctor
+./bin/research-mcp doctor
 #+end_src
 
-* Dry-run the four-way matrix
-
-This creates run plans and request artifacts but makes no LLM calls.
+For raw stdio server launch while debugging:
 
 #+begin_src sh
-bash bin/research-lab matrix \
+./bin/research-mcp brave
+#+end_src
+
+#+begin_src sh
+./bin/research-mcp fetch
+#+end_src
+
+* Setup harnesses
+
+With Nix:
+
+#+begin_src sh
+nix develop
+./bin/research-lab setup
+#+end_src
+
+Without Nix, install Python 3.11+, git, uv/uvx, Node 24+ with npx, then:
+
+#+begin_src sh
+./bin/research-lab setup
+#+end_src
+
+Check all local prerequisites:
+
+#+begin_src sh
+./bin/research-lab doctor
+#+end_src
+
+* Dry-run matrix
+
+This requires no credentials, no upstream checkout, and spends no API credits. It writes the exact per-lane plans.
+
+#+begin_src sh
+./bin/research-lab matrix \
   --case DR-001 \
   --parallel 4 \
   --model z-ai/glm-5.3-flash \
   --dry-run
 #+end_src
 
-* Run the controlled GLM-5.3-Flash shootout
+* Run GLM-5.3-Flash matrix
 
 #+begin_src sh
-bash bin/research-lab matrix \
+./bin/research-lab matrix \
   --case DR-001 \
   --parallel 4 \
   --model z-ai/glm-5.3-flash \
   --strict
 #+end_src
 
-The four harnesses run concurrently, not sequentially.  =--parallel= controls the maximum number of active harness processes.
+Each lane gets its own Brave and Fetch stdio subprocess pair, so concurrent runs do not share MCP process state.
 
-* Run selected harnesses
+* Inspect latest results
 
 #+begin_src sh
-bash bin/research-lab matrix \
-  --case DR-001 \
-  --harnesses starintel,researchharness,gpt-researcher \
-  --parallel 3 \
-  --model z-ai/glm-5.3-flash
+for harness in starintel researchharness gpt-researcher smolagents-odr; do
+  latest="$(find "runs/DR-001/$harness" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | tail -n1)"
+  printf '\n== %s ==\n' "$harness"
+  if [ -n "$latest" ]; then
+    jq '{status, duration_seconds, model, retrieval_mode}' "$latest/result.json"
+    jq '{servers, used_tools}' "$latest/mcp.json"
+  else
+    echo '(no run yet)'
+  fi
+done
 #+end_src
 
-* Run only StarIntel
+* Compare reports
 
 #+begin_src sh
-bash bin/research-lab run \
-  --case DR-001 \
-  --harness starintel \
-  --model z-ai/glm-5.3-flash
+for harness in starintel researchharness gpt-researcher smolagents-odr; do
+  latest="$(find "runs/DR-001/$harness" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | tail -n1)"
+  if [ -n "$latest" ]; then
+    printf '\n\n===== %s =====\n' "$harness"
+    cat "$latest/report.md"
+  fi
+done
 #+end_src
 
 * Run layout
-
-Each harness run writes a separate directory so concurrent writers never share result files.
 
 #+begin_example
 runs/DR-001/<harness>/<run-id>/
@@ -99,30 +147,39 @@ runs/DR-001/<harness>/<run-id>/
   stdout.log
   stderr.log
   report.md
-  adapter-result.json     # when supplied by the adapter
   result.json
-  traces/                 # harness-specific when available
-  workspace/              # harness-specific when available
+  adapter-result.json
+  mcp.json
+  mcp-events.jsonl
+  mcp-brave.stderr.log
+  mcp-fetch.stderr.log
+  traces/                 # when the upstream emits them
+  workspace/              # when the upstream uses one
+  native-artifacts/       # StarIntel native output capture
 #+end_example
 
-* Controlled-test contract
+=mcp.json= records package versions, transport, advertised tools, and tools actually used. =mcp-events.jsonl= records search queries, fetched URLs, success/failure, counts, and durations. API keys are never written.
 
-The shared instructions live in [[file:guidelines/auto-research.org][guidelines/auto-research.org]].  Cases contain the research question only.  This deliberately separates the benchmark contract from the benchmark task so every harness sees the same requirements.
+* Controlled network policy
 
-* Cases
+For a controlled benchmark:
 
-- [[file:cases/DR-001.org][DR-001]] — compare current open-source deep-research harness architectures.
+#+begin_example
+LLM inference  -> OpenRouter
+search         -> Brave Search MCP
+page retrieval -> Fetch MCP
+#+end_example
 
-Add another =cases/DR-NNN.org= with =#+lab_id:= and a =* Question= heading to create another experiment.
+No adapter is permitted to silently select a different hosted search or scraping backend. A lane that cannot honor the contract must fail or explicitly identify a partial adaptation.
 
-* Notes on fairness
+GPT Researcher also uses =openai/text-embedding-3-small= through OpenRouter for its internal vector-memory requirement. This is embedding work, not the reasoning/generation model under test; all reasoning/generation roles remain =z-ai/glm-5.3-flash=.
 
-- GLM-5.3-Flash is forced for reasoning/generation wherever the upstream exposes model control.
-- Search APIs are still harness-native in this first lane: ResearchHarness uses its own tools, GPT Researcher uses Tavily by default, and the smolagents lane uses Serper.
-- The StarIntel lane runs from the lab's pinned checkout and uses its own isolated port/PID/log paths; it does not use the developer working tree.
-- Missing required credentials are reported before a paid run.  =--strict= converts missing prerequisites into matrix failures.
-- =--dry-run= is the no-money smoke-test path.
+StarIntel is currently the one partial lane: the current CL runtime does not expose an MCP tool injection seam at benchmark launch, so the adapter performs Brave discovery + Fetch retrieval first and supplies that evidence to the native Auto Research loop. Its =adapter-result.json= marks =adaptive_mcp_tools=false= so it cannot be mistaken for equivalent native tool access.
 
-* Future lanes
+* Test without spending credits
 
-=langchain-odr= and =storm= are already registered as disabled scaffolds in =config/harnesses.json=.  Enable them only after their OpenRouter model path and output capture are pinned and verified.
+#+begin_src sh
+python -m unittest discover -s tests -v
+#+end_src
+
+The test suite uses deterministic fake stdio MCP servers for initialization, tool discovery, normalization, concurrency, timeouts, malformed responses, secret redaction, and dry-run matrix behavior.
