@@ -60,13 +60,23 @@ class ResearchLabTests(unittest.TestCase):
         self.assertIn("CONTROLLED RETRIEVAL CONTRACT", request["prompt"])
         self.assertIn(question, request["prompt"])
 
-    def test_config_is_json_refs_are_pinned_and_remotes_use_ssh(self) -> None:
+    def test_config_is_json_refs_are_pinned_and_remotes_follow_ssh_policy(self) -> None:
         config = json.loads((ROOT / "config" / "harnesses.json").read_text())
+
+        self.assertEqual(
+            config["harnesses"]["starintel"]["repo"],
+            "git@git.starintel.actor:starintel-labs/auto-research-llm-cl.git",
+        )
+
         for harness_id, spec in config["harnesses"].items():
-            self.assertTrue(
-                spec["repo"].startswith("git@github.com:"),
-                f"{harness_id} must use a GitHub SSH remote, got {spec['repo']}",
-            )
+            repo = spec["repo"]
+            self.assertFalse(repo.startswith("http://") or repo.startswith("https://"), f"{harness_id} must not use HTTP(S)")
+            if harness_id != "starintel":
+                self.assertTrue(
+                    repo.startswith("ssh://git@ssh.github.com:443/"),
+                    f"{harness_id} must use GitHub SSH over 443, got {repo}",
+                )
+
         for harness_id in config["default_harnesses"]:
             ref = config["harnesses"][harness_id]["ref"]
             self.assertRegex(ref, r"^[0-9a-f]{40}$")
