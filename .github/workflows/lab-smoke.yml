@@ -14,8 +14,12 @@ jobs:
           python-version: '3.11'
       - name: Python lab tests
         run: python -m unittest discover -s tests -v
-      - name: CLI syntax
-        run: bash -n bin/research-lab
+      - name: CLI and adapter syntax
+        run: |
+          bash -n bin/research-lab
+          bash -n adapters/starintel/bin/research
+          test -x bin/research-lab
+          test -x adapters/starintel/bin/research
       - name: JSON config
         run: python -m json.tool config/harnesses.json >/dev/null
       - name: No-spend doctor invocation
