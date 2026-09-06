@@ -48,6 +48,17 @@ def marker_path(harness_id: str) -> Path:
     return venv_path(harness_id) / ".research-lab-ready.json"
 
 
+def repair_origin(harness_id: str, spec: dict[str, Any]) -> None:
+    target = checkout_path(harness_id)
+    if not (target / ".git").exists():
+        return
+    desired = spec["repo"]
+    current = subprocess.check_output(["git", "remote", "get-url", "origin"], cwd=target, text=True).strip()
+    if current != desired:
+        print(f"[setup] {harness_id}: origin -> {desired}")
+        run(["git", "remote", "set-url", "origin", desired], cwd=target)
+
+
 def checkout_ready(harness_id: str, spec: dict[str, Any]) -> bool:
     target = checkout_path(harness_id)
     if not (target / ".git").exists():
@@ -78,6 +89,7 @@ def ensure_checkout(harness_id: str, spec: dict[str, Any]) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     if not (target / ".git").exists():
         run(["git", "clone", "--filter=blob:none", spec["repo"], str(target)])
+    repair_origin(harness_id, spec)
     run(["git", "fetch", "--tags", "--prune", "origin"], cwd=target)
     run(["git", "checkout", "--detach", spec["ref"]], cwd=target)
     return target
@@ -100,8 +112,6 @@ def install_python_lane(harness_id: str, spec: dict[str, Any], target: Path) -> 
     elif adapter == "gpt_researcher":
         run(["uv", "pip", "install", "--python", str(py), "-e", str(target)])
     elif adapter == "smolagents_odr":
-        # Controlled text-only lane needs the agent core plus LiteLLM.  Do not
-        # install the upstream deep-research demo's Torch/vision/test stack.
         run(["uv", "pip", "install", "--python", str(py), "-e", f"{target}[litellm]"])
     else:
         raise SystemExit(f"{harness_id}: no setup recipe for adapter {adapter!r}")
@@ -112,6 +122,7 @@ def install_python_lane(harness_id: str, spec: dict[str, Any], target: Path) -> 
 
 
 def prepare(harness_id: str, spec: dict[str, Any], *, force: bool = False) -> None:
+    repair_origin(harness_id, spec)
     if not force and env_ready(harness_id, spec):
         print(f"[setup] {harness_id}: ready")
         return
