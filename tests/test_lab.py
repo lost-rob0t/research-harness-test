@@ -60,8 +60,13 @@ class ResearchLabTests(unittest.TestCase):
         self.assertIn("CONTROLLED RETRIEVAL CONTRACT", request["prompt"])
         self.assertIn(question, request["prompt"])
 
-    def test_config_is_json_and_refs_are_pinned_for_default_matrix(self) -> None:
+    def test_config_is_json_refs_are_pinned_and_remotes_use_ssh(self) -> None:
         config = json.loads((ROOT / "config" / "harnesses.json").read_text())
+        for harness_id, spec in config["harnesses"].items():
+            self.assertTrue(
+                spec["repo"].startswith("git@github.com:"),
+                f"{harness_id} must use a GitHub SSH remote, got {spec['repo']}",
+            )
         for harness_id in config["default_harnesses"]:
             ref = config["harnesses"][harness_id]["ref"]
             self.assertRegex(ref, r"^[0-9a-f]{40}$")
@@ -70,6 +75,7 @@ class ResearchLabTests(unittest.TestCase):
     def test_python_entrypoints_compile(self) -> None:
         for path in (
             "scripts/research_lab.py",
+            "scripts/setup_harnesses.py",
             "scripts/adapter_entry.py",
             "scripts/mcp_client.py",
             "scripts/research_mcp.py",
