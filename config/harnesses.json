@@ -9,6 +9,11 @@
     "gpt-researcher",
     "smolagents-odr"
   ],
+  "retrieval": {
+    "search": "mcp:brave/brave_web_search",
+    "fetch": "mcp:fetch/fetch",
+    "config": "mcp/servers.json"
+  },
   "harnesses": {
     "starintel": {
       "name": "StarIntel Auto Research CL",
@@ -16,7 +21,8 @@
       "ref": "159441f478259996bbfe4290800dbc280c43ad6a",
       "adapter": "starintel",
       "enabled": true,
-      "required_env": ["OPENROUTER_API_KEY", "AR_RUNTIME_SOURCE"]
+      "required_env": ["OPENROUTER_API_KEY", "BRAVE_API_KEY", "AR_RUNTIME_SOURCE"],
+      "retrieval_mode": "mcp-prefetch"
     },
     "researchharness": {
       "name": "InternScience ResearchHarness",
@@ -24,7 +30,8 @@
       "ref": "72e8a44737aadabc8c3f9e5c7ea76883b9c7032f",
       "adapter": "researchharness",
       "enabled": true,
-      "required_env": ["OPENROUTER_API_KEY", "SERPER_KEY", "JINA_KEY", "MINERU_TOKEN"]
+      "required_env": ["OPENROUTER_API_KEY", "BRAVE_API_KEY"],
+      "retrieval_mode": "mcp-tools"
     },
     "gpt-researcher": {
       "name": "GPT Researcher",
@@ -32,7 +39,8 @@
       "ref": "6f998577d547b1e54ec662dac63583aa11e3b84b",
       "adapter": "gpt_researcher",
       "enabled": true,
-      "required_env": ["OPENROUTER_API_KEY", "TAVILY_API_KEY"]
+      "required_env": ["OPENROUTER_API_KEY", "BRAVE_API_KEY"],
+      "retrieval_mode": "mcp-custom-retriever"
     },
     "smolagents-odr": {
       "name": "Hugging Face Open Deep Research",
@@ -40,7 +48,8 @@
       "ref": "30bb1161095dbae2271e6bc3cc4c219cc3897a57",
       "adapter": "smolagents_odr",
       "enabled": true,
-      "required_env": ["OPENROUTER_API_KEY", "SERPER_KEY"]
+      "required_env": ["OPENROUTER_API_KEY", "BRAVE_API_KEY"],
+      "retrieval_mode": "mcp-tools"
     },
     "langchain-odr": {
       "name": "LangChain Open Deep Research",
@@ -48,8 +57,8 @@
       "ref": "main",
       "adapter": "langchain_odr",
       "enabled": false,
-      "required_env": ["OPENROUTER_API_KEY", "TAVILY_API_KEY"],
-      "note": "Scaffolded but excluded from the default matrix until its OpenRouter base/provider path is verified against the pinned checkout."
+      "required_env": ["OPENROUTER_API_KEY", "BRAVE_API_KEY"],
+      "note": "Scaffolded; enable after its controlled MCP tool path is pinned and verified."
     },
     "storm": {
       "name": "Stanford STORM",
@@ -57,8 +66,8 @@
       "ref": "main",
       "adapter": "storm",
       "enabled": false,
-      "required_env": ["OPENROUTER_API_KEY"],
-      "note": "Scaffolded as a specialist comparison lane; not in the first controlled matrix."
+      "required_env": ["OPENROUTER_API_KEY", "BRAVE_API_KEY"],
+      "note": "Scaffolded specialist lane; enable after its controlled MCP tool path is pinned and verified."
     }
   }
 }
