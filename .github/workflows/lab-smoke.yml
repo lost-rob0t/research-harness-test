@@ -14,6 +14,14 @@ jobs:
           python-version: '3.11'
       - name: Python lab and fake MCP tests
         run: python -m unittest discover -s tests -v
+      - name: Python entrypoint syntax
+        run: |
+          python -m py_compile scripts/research_lab.py
+          python -m py_compile scripts/setup_harnesses.py
+          python -m py_compile scripts/adapter_entry.py
+          python -m py_compile scripts/mcp_client.py
+          python -m py_compile scripts/research_mcp.py
+          python -m py_compile scripts/starintel_entry.py
       - name: CLI and adapter syntax
         run: |
           bash -n bin/research-lab
@@ -27,5 +35,7 @@ jobs:
           python -m json.tool config/harnesses.json >/dev/null
           python -m json.tool mcp/servers.json >/dev/null
           python -m json.tool tests/fixtures/mcp-servers.fake.json >/dev/null
+      - name: Credential-free wrapper dry run
+        run: ./bin/research-lab matrix --case DR-001 --parallel 4 --model z-ai/glm-5.3-flash --dry-run
       - name: No-spend lab doctor invocation
         run: python scripts/research_lab.py doctor || true
