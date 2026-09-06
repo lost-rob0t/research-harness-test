@@ -4,7 +4,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     prolog-rlm = {
-      url = "git+https://git.starintel.actor/nsaspy/prolog-rlm.git?rev=e1ed6c2b5f717d9bb380fcf22d144737299197f8";
+      url = "git+ssh://git@git.starintel.actor/nsaspy/prolog-rlm.git?rev=e1ed6c2b5f717d9bb380fcf22d144737299197f8";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
