@@ -40,7 +40,7 @@
       "ref": "30bb1161095dbae2271e6bc3cc4c219cc3897a57",
       "adapter": "smolagents_odr",
       "enabled": true,
-      "required_env": ["OPENROUTER_API_KEY", "SERPAPI_API_KEY"]
+      "required_env": ["OPENROUTER_API_KEY", "SERPER_KEY"]
     },
     "langchain-odr": {
       "name": "LangChain Open Deep Research",
