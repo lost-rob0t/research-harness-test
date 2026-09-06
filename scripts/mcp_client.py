@@ -111,33 +111,37 @@ class MCPStdioClient:
             stderr: Any = self._stderr_handle
         else:
             stderr = subprocess.DEVNULL
-        self.proc = subprocess.Popen(
-            argv,
-            cwd=str(self.cwd),
-            env=env,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=stderr,
-            text=True,
-            bufsize=1,
-        )
-        if self.proc.stdin is None or self.proc.stdout is None:
-            raise MCPError(f"{self.server_id}: failed to open stdio pipes")
-        threading.Thread(target=self._read_stdout, name=f"mcp-{self.server_id}-reader", daemon=True).start()
-        result = self.request(
-            "initialize",
-            {
-                "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": {"name": "research-harness-test", "version": "1"},
-            },
-        )
-        self.protocol_version = str(result.get("protocolVersion", "")) if isinstance(result, dict) else None
-        self.server_info = dict(result.get("serverInfo", {})) if isinstance(result, dict) else {}
-        self.notify("notifications/initialized", {})
-        listed = self.request("tools/list", {})
-        self.tools = list(listed.get("tools", [])) if isinstance(listed, dict) else []
-        return self
+        try:
+            self.proc = subprocess.Popen(
+                argv,
+                cwd=str(self.cwd),
+                env=env,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=stderr,
+                text=True,
+                bufsize=1,
+            )
+            if self.proc.stdin is None or self.proc.stdout is None:
+                raise MCPError(f"{self.server_id}: failed to open stdio pipes")
+            threading.Thread(target=self._read_stdout, name=f"mcp-{self.server_id}-reader", daemon=True).start()
+            result = self.request(
+                "initialize",
+                {
+                    "protocolVersion": PROTOCOL_VERSION,
+                    "capabilities": {},
+                    "clientInfo": {"name": "research-harness-test", "version": "1"},
+                },
+            )
+            self.protocol_version = str(result.get("protocolVersion", "")) if isinstance(result, dict) else None
+            self.server_info = dict(result.get("serverInfo", {})) if isinstance(result, dict) else {}
+            self.notify("notifications/initialized", {})
+            listed = self.request("tools/list", {})
+            self.tools = list(listed.get("tools", [])) if isinstance(listed, dict) else []
+            return self
+        except Exception:
+            self.close()
+            raise
 
     def _read_stdout(self) -> None:
         assert self.proc and self.proc.stdout
@@ -157,8 +161,13 @@ class MCPStdioClient:
             raise MCPError(f"{self.server_id}: MCP process is not running")
         if self.proc.poll() is not None:
             raise MCPError(f"{self.server_id}: MCP process exited with {self.proc.returncode}")
-        self.proc.stdin.write(json.dumps(payload, separators=(",", ":")) + "\n")
-        self.proc.stdin.flush()
+        try:
+            self.proc.stdin.write(json.dumps(payload, separators=(",", ":")) + "\n")
+            self.proc.stdin.flush()
+        except (BrokenPipeError, OSError) as exc:
+            returncode = self.proc.poll()
+            suffix = f" with {returncode}" if returncode is not None else ""
+            raise MCPError(f"{self.server_id}: MCP process closed stdio{suffix}") from exc
 
     def request(self, method: str, params: dict[str, Any]) -> Any:
         with self._request_lock:
@@ -167,13 +176,17 @@ class MCPStdioClient:
             self._send({"jsonrpc": "2.0", "id": request_id, "method": method, "params": params})
             deadline = time.monotonic() + self.timeout
             while True:
+                if self.proc is not None and self.proc.poll() is not None and self._messages.empty():
+                    raise MCPError(
+                        f"{self.server_id}: MCP process exited with {self.proc.returncode} while waiting for {method}"
+                    )
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise MCPError(f"{self.server_id}: timeout waiting for {method}")
                 try:
-                    message = self._messages.get(timeout=remaining)
-                except queue.Empty as exc:
-                    raise MCPError(f"{self.server_id}: timeout waiting for {method}") from exc
+                    message = self._messages.get(timeout=min(remaining, 0.1))
+                except queue.Empty:
+                    continue
                 if message.get("id") != request_id:
                     continue
                 if "error" in message:
@@ -267,17 +280,21 @@ class LabRetrieval:
         self._event_lock = threading.Lock()
 
     def start(self) -> "LabRetrieval":
-        for server_id in ("brave", "fetch"):
-            spec = self.config["servers"][server_id]
-            client = MCPStdioClient(
-                server_id,
-                spec,
-                timeout=self.timeout,
-                stderr_path=self.output_dir / f"mcp-{server_id}.stderr.log",
-            ).start()
-            self.clients[server_id] = client
-        self._write_metadata()
-        return self
+        try:
+            for server_id in ("brave", "fetch"):
+                spec = self.config["servers"][server_id]
+                client = MCPStdioClient(
+                    server_id,
+                    spec,
+                    timeout=self.timeout,
+                    stderr_path=self.output_dir / f"mcp-{server_id}.stderr.log",
+                ).start()
+                self.clients[server_id] = client
+            self._write_metadata()
+            return self
+        except Exception:
+            self.close()
+            raise
 
     def _write_metadata(self) -> None:
         servers: list[dict[str, Any]] = []
@@ -376,6 +393,7 @@ class LabRetrieval:
     def close(self) -> None:
         for client in reversed(list(self.clients.values())):
             client.close()
+        self.clients.clear()
         self._write_metadata()
 
     def __enter__(self) -> "LabRetrieval":
