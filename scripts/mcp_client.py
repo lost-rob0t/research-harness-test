@@ -14,6 +14,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "mcp" / "servers.json"
 PROTOCOL_VERSION = "2025-06-18"
+BRAVE_MAX_QUERY_CHARS = 400
+BRAVE_MAX_QUERY_WORDS = 50
 URL_RE = re.compile(r"https?://[^\s<>\]\)\"']+")
 MD_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)]+)\)")
 
@@ -75,6 +77,17 @@ def content_text(result: Any) -> str:
     if "structuredContent" in result:
         return json.dumps(result["structuredContent"], ensure_ascii=False)
     return json.dumps(result, ensure_ascii=False)
+
+
+def bound_brave_query(query: str) -> str:
+    """Fit a query deterministically inside Brave web/news tool limits."""
+    words = query.strip().split()
+    bounded = " ".join(words[:BRAVE_MAX_QUERY_WORDS])
+    if len(bounded) > BRAVE_MAX_QUERY_CHARS:
+        bounded = bounded[:BRAVE_MAX_QUERY_CHARS]
+        if " " in bounded:
+            bounded = bounded.rsplit(" ", 1)[0]
+    return bounded.strip()
 
 
 class MCPStdioClient:
@@ -247,7 +260,17 @@ def parse_search_results(text: str, limit: int = 10) -> list[dict[str, str]]:
         try:
             _walk_results(json.loads(stripped), found)
         except json.JSONDecodeError:
-            pass
+            # Brave's official MCP emits one JSON object per text content
+            # chunk. content_text joins those chunks with newlines, so parse
+            # the newline-delimited objects before falling back to regexes.
+            for raw in text.splitlines():
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    _walk_results(json.loads(line), found)
+                except json.JSONDecodeError:
+                    continue
     if not found:
         for title, url in MD_LINK_RE.findall(text):
             found.append({"url": url, "title": title.strip() or url, "snippet": ""})
@@ -328,6 +351,9 @@ class LabRetrieval:
         started = time.monotonic()
         try:
             result = self.clients[server_id].call_tool(name, arguments)
+            if result.get("isError"):
+                detail = content_text(result).strip() or "MCP tool returned isError=true"
+                raise MCPError(f"{server_id}:{name}: {detail[:500]}")
             duration = time.monotonic() - started
             self.used_tools.add(f"{server_id}:{name}")
             self._event({**event, "server": server_id, "tool": name, "success": True, "duration_seconds": round(duration, 4)})
@@ -348,25 +374,45 @@ class LabRetrieval:
             raise
 
     def search(self, query: str, count: int = 10) -> list[dict[str, str]]:
+        sent_query = bound_brave_query(query)
         text = self._tool(
             "brave",
             "brave_web_search",
-            {"query": query, "count": max(1, min(int(count), 20))},
-            event={"kind": "search", "query": query, "requested_count": count},
+            {"query": sent_query, "count": max(1, min(int(count), 20))},
+            event={
+                "kind": "search",
+                "query": query,
+                "sent_query": sent_query,
+                "requested_count": count,
+            },
         )
         results = parse_search_results(text, limit=count)
-        self._event({"kind": "search-normalized", "query": query, "result_count": len(results), "success": True})
+        self._event(
+            {
+                "kind": "search-normalized",
+                "query": query,
+                "sent_query": sent_query,
+                "result_count": len(results),
+                "success": True,
+            }
+        )
         return results
 
     def news(self, query: str, count: int = 10) -> list[dict[str, str]]:
         tools = {tool.get("name") for tool in self.clients["brave"].tools}
         if "brave_news_search" not in tools:
             return self.search(query, count=count)
+        sent_query = bound_brave_query(query)
         text = self._tool(
             "brave",
             "brave_news_search",
-            {"query": query, "count": max(1, min(int(count), 20))},
-            event={"kind": "news-search", "query": query, "requested_count": count},
+            {"query": sent_query, "count": max(1, min(int(count), 20))},
+            event={
+                "kind": "news-search",
+                "query": query,
+                "sent_query": sent_query,
+                "requested_count": count,
+            },
         )
         return parse_search_results(text, limit=count)
 
